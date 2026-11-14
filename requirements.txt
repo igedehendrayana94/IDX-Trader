@@ -2,3 +2,4 @@ yfinance>=1.0
 pandas>=2.0
 streamlit>=1.40
 scikit-learn>=1.5
+openpyxl>=3.1

@@ -25,4 +25,6 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 ## ML results (2026-11-14, 46 stocks, 5y)
 - swing: walk-forward AUC ~0.50 = no edge; app tells user to ignore ml_prob.
 - daily: AUC 0.54-0.56 every block; top-10% win ~43% vs ~34% base, avg net return still ~break-even after fees.
-- Ideas not done: IHSG index + foreign flow features, sector features, probability calibration, longer history.
+- IHSG features added 2026-11-14 (`^JKSE` via yfinance: ret5, ret20, dist to EMA50, 20d volatility, stock ret20 minus IHSG ret20). Sidebar toggle, default on. Walk-forward: daily AUC 0.55 -> 0.54, swing 0.505 -> 0.492; top-10% avg return in daily slightly better (-0.24% -> -0.06%). Within noise: overlaps the equal-weight market features.
+- Foreign flow: idx.co.id API is behind a Cloudflare challenge (403 for curl and for a Playwright browser); not bypassed. User downloads 'Ringkasan Saham' Excel per day into `data/foreign/` (gitignored, date YYYYMMDD in file name). `idx.load_foreign` reads 'Kode Saham', 'Foreign Buy', 'Foreign Sell'. Features fnet5/fnet20 = net foreign shares over 5/20 days divided by normal volume. Used by the model only when >= 60 trading days of files exist.
+- Ideas not done: sector features, probability calibration, longer history.

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import streamlit as st
 
 import idx
@@ -13,6 +15,12 @@ T = {
         "capital": "Capital (Rp)", "alloc": "Max allocation per stock",
         "min_value": "Min avg daily trading value (Rp billion)", "universe": "Stock list (IDX codes)",
         "only_signal": "Show only full signals",
+        "use_ihsg": "Use IHSG features in ML",
+        "foreign_ok": "Foreign flow: {n} trading days loaded from data/foreign{used}.",
+        "foreign_used": ", used by the model", "foreign_wait": ", the model uses it from 60 days",
+        "foreign_none": "Foreign flow: no files yet. Download 'Ringkasan Saham' (Excel) for each day from "
+                        "idx.co.id > Data Pasar > Ringkasan Perdagangan, then save it in data/foreign/ with the "
+                        "date in the file name (YYYYMMDD).",
         "rules": "Stop loss capped at {loss} below entry. Fees: buy {buy}, sell {sell}.",
         "downloading": "Downloading prices...", "training": "Training ML model (walk-forward)...",
         "refresh": "Refresh data", "no_data": "No data: ", "no_liquid": "No stock passes the liquidity filter.",
@@ -42,6 +50,12 @@ T = {
         "capital": "Modal (Rp)", "alloc": "Alokasi maksimum per saham",
         "min_value": "Nilai transaksi rata-rata harian minimum (miliar Rp)", "universe": "Daftar saham (kode BEI)",
         "only_signal": "Tampilkan hanya sinyal penuh",
+        "use_ihsg": "Pakai fitur IHSG pada model",
+        "foreign_ok": "Aliran dana asing (*foreign flow*): {n} hari perdagangan dimuat dari data/foreign{used}.",
+        "foreign_used": ", dipakai oleh model", "foreign_wait": ", model memakainya mulai 60 hari",
+        "foreign_none": "Aliran dana asing (*foreign flow*): belum ada berkas. Unduh 'Ringkasan Saham' (Excel) "
+                        "untuk setiap hari dari idx.co.id > Data Pasar > Ringkasan Perdagangan, lalu simpan ke "
+                        "data/foreign/ dengan tanggal pada nama berkas (YYYYMMDD).",
         "rules": "*Stop loss* dibatasi paling jauh {loss} di bawah harga masuk. Biaya: beli {buy}, jual {sell}.",
         "downloading": "Mengunduh data harga...", "training": "Melatih model machine learning (walk-forward)...",
         "refresh": "Perbarui data", "no_data": "Data tidak tersedia: ",
@@ -101,6 +115,7 @@ with st.sidebar:
     min_value = st.number_input(t["min_value"], min_value=0.0, value=5.0, step=1.0) * 1e9
     codes = st.text_area(t["universe"], " ".join(idx.UNIVERSE), height=160)
     only_signal = st.checkbox(t["only_signal"], value=False)
+    use_ihsg = st.checkbox(t["use_ihsg"], value=True)
     st.caption(t["rules"].format(loss=f"{num(idx.MAX_LOSS * 100)}%", buy=f"{num(idx.BUY_FEE * 100, 2)}%",
                                  sell=f"{num(idx.SELL_FEE * 100, 2)}%"))
 
@@ -110,16 +125,31 @@ def load(code_list):
     return idx.fetch(list(code_list), period="5y")
 
 
+FOREIGN_DIR = Path(__file__).parent / "data" / "foreign"
+FOREIGN_MIN_DAYS = 60  # fewer days = feature mostly empty in training, no point using it
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def train(code_list, mode):
-    p = ml.dataset(load(code_list), mode)
+def load_ihsg():
+    return idx.fetch_ihsg(period="5y")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_foreign():
+    return idx.load_foreign(FOREIGN_DIR)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def train(code_list, mode, use_ihsg, use_foreign):
+    p = ml.dataset(load(code_list), mode, ihsg=load_ihsg() if use_ihsg else None,
+                   foreign=load_foreign() if use_foreign else None)
     return ml.walk_forward(p, mode), ml.predict_latest(p)
 
 
 code_list = tuple(sorted({c.strip().upper() for c in codes.split() if c.strip()}))
 if st.button(t["refresh"]):
-    load.clear()
-    train.clear()
+    for f in (load, load_ihsg, load_foreign, train):
+        f.clear()
 with st.spinner(t["downloading"]):
     data = load(code_list)
 missing = set(code_list) - set(data)
@@ -130,8 +160,10 @@ df = idx.screen(data, mode, capital, max_alloc, min_value)
 if df.empty:
     st.info(t["no_liquid"])
     st.stop()
+foreign_days = load_foreign()["date"].nunique()
+use_foreign = foreign_days >= FOREIGN_MIN_DAYS
 with st.spinner(t["training"]):
-    wf, prob = train(code_list, mode)
+    wf, prob = train(code_list, mode, use_ihsg, use_foreign)
 df.insert(4, "ml_prob", df["code"].map(prob).round(3))
 auc = wf["auc"].mean() if len(wf) else 0.5
 has_edge = auc >= 0.53  # shortcut: fixed AUC bar, replace with a significance test if folds grow
@@ -151,6 +183,8 @@ for _, r in buys.iterrows():
 
 st.subheader(t["ml_title"])
 st.caption(t["ml_caption"])
+st.caption(t["foreign_ok"].format(n=foreign_days, used=t["foreign_used" if use_foreign else "foreign_wait"])
+           if foreign_days else t["foreign_none"])
 c1, c2 = st.columns([1, 3])
 c1.metric(t["auc"], num(auc, 3), help=t["auc_help"])
 (c1.success if has_edge else c1.error)(t["edge"] if has_edge else t["no_edge"])

@@ -56,6 +56,35 @@ def fetch(codes, period="2y"):
     return out
 
 
+def fetch_ihsg(period="2y"):
+    """IHSG (Jakarta Composite, ^JKSE) daily bars."""
+    df = yf.download("^JKSE", period=period, interval="1d", auto_adjust=False, progress=False)
+    df.columns = df.columns.get_level_values(0)  # yfinance returns (Price, Ticker) columns
+    return df.dropna(subset=["Close"])
+
+
+def load_foreign(folder="data/foreign"):
+    """Foreign flow from IDX 'Ringkasan Saham' files downloaded by hand from idx.co.id
+    (Data Pasar > Ringkasan Perdagangan > Ringkasan Saham). One file per trading day, date in the
+    file name as YYYYMMDD. Returns long frame: date, code, fnet (foreign buy - sell, shares)."""
+    import re
+    from pathlib import Path
+    rows = []
+    for f in sorted(Path(folder).glob("*")):
+        m = re.search(r"(20\d{6})", f.name)
+        if not m or f.suffix.lower() not in (".xlsx", ".xls", ".csv"):
+            continue
+        t = pd.read_csv(f) if f.suffix.lower() == ".csv" else pd.read_excel(f)
+        cols = {c.lower().strip(): c for c in t.columns}
+        try:
+            code, fb, fs = cols["kode saham"], cols["foreign buy"], cols["foreign sell"]
+        except KeyError:
+            raise ValueError(f"{f.name}: expected columns 'Kode Saham', 'Foreign Buy', 'Foreign Sell'")
+        rows.append(pd.DataFrame({"date": pd.Timestamp(m.group(1)), "code": t[code].astype(str).str.strip(),
+                                  "fnet": pd.to_numeric(t[fb], errors="coerce") - pd.to_numeric(t[fs], errors="coerce")}))
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["date", "code", "fnet"])
+
+
 def indicators(df):
     d = df.copy()
     c, h, l = d["Close"], d["High"], d["Low"]
@@ -185,4 +214,12 @@ if __name__ == "__main__":
             assert stop < entry and (entry - stop) / entry <= MAX_LOSS + 1e-9, (mode, entry, stop)
             assert stop % tick(stop) == 0 and target > entry
             assert lots * LOT * entry * (1 + BUY_FEE) <= 2_500_000
+    # foreign flow file parsing
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        pd.DataFrame({"No": [1, 2], "Kode Saham": ["BBCA", "TLKM"], "Foreign Sell": [100, 50],
+                      "Foreign Buy": [300, 20]}).to_excel(f"{tmp}/Ringkasan Saham-20261113.xlsx", index=False)
+        fr = load_foreign(tmp)
+        assert fr["fnet"].tolist() == [200, -30] and fr["date"].iloc[0] == pd.Timestamp("2026-11-13"), fr
+        assert load_foreign(tmp + "/missing").empty
     print("ok")
