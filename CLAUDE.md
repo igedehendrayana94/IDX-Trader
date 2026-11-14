@@ -11,6 +11,7 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 - `idx.py`: fetch, indicators (EMA20/50, RSI14, MACD, ATR14), signals, trade plan, backtest, screen. `python idx.py` runs the offline self-check.
 - `ml.py`: ML layer. `HistGradientBoostingClassifier` on 17 scale-free features (returns, EMA distances, RSI, MACD, ATR, volume ratio, 20d-high distance, liquidity, equal-weight market context). Label = the mode's trade plan from that day ends in net profit (reuses `idx.outcome`). Walk-forward validation: 4 blocks of 120 trading days, train only on earlier dates with a `hold`+1 day gap. `python ml.py` = leakage check on random walks (AUC must stay ~0.5).
 - `app.py`: Streamlit dashboard; sidebar for mode, capital, allocation, liquidity, universe. Loads 5y data; shows walk-forward table, avg AUC, edge verdict (AUC >= 0.53), ml_prob column, top ML picks.
+- Bilingual UI (Indonesia default, English) via the `T` dict in `app.py`; sidebar toggle. Indonesian strings follow KBBI forms and the Jutif term rules (`Jurnal Jutif Template/JUTIF-SLR-Guide.md` §6.2): italic *swing*, *stop loss*, *backtest*, *walk-forward*, *machine learning*; "uji historis (*backtest*)"; "jeda" not "tertunda" (not in KBBI); Indonesian number format (1.000,50) via `num()`. Add every new string to both languages.
 
 ## Trading rules (user decisions, 2026-11-14)
 - User trades daily and swing. Two modes:
