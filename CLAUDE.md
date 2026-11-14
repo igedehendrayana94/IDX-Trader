@@ -39,3 +39,10 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 - ML tab: when no edge, the probability ranking is hidden inside the advanced expander.
 - Guide tab: 6-step how-to (incl. Stockbit Auto Order), glossary, risk box.
 - Check: AppTest over id/en x swing/daily with forced signals (temporary script, not committed).
+
+## Stockbit-style look (2026-11-14)
+- Reference: stockbit.com (screenshot + CSS colours). Style only: no Stockbit logo or name as branding; app stays "IDX Trader".
+- Tokens: brand green #00AB6B / red #EE4A49 for sparklines and accents; text and buttons darkened to #007A4D / #C62F2E (WCAG 4.5:1; #00AB6B on white is 2.98:1). Text #333333, muted #6B6B6B, lines #EDEDED. Font Nunito Sans (free, close to Proxima Nova). Theme in `.streamlit/config.toml`.
+- `ui.py`: HTML parts (CSS tokens, watchlist row with 30-day SVG sparkline, change "+94 (+1,78%)" with sign always shown, order-ticket rows, stats strip). `python ui.py` = self-check incl. HTML escaping of user codes.
+- Header = IHSG watchlist row + stats strip. Buy card = watchlist row + BELI chip + order ticket + reasons + full-width "BELI {code} DI STOCKBIT" button. "Semua saham" = watchlist with "3/4 syarat" chips; dataframe moved into "Tabel lengkap" expander.
+- Company names hardcoded in `idx.NAMES` for the default list.

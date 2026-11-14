@@ -44,6 +44,9 @@ T = {
         "history_bad": "On this stock, this rule lost money on average in the past. Consider a smaller position "
                        "or skip it.",
         "open_stockbit": "Open {code} in Stockbit",
+        "cta_buy": "BUY {code} IN STOCKBIT", "total": "Total cost", "maxloss": "Max loss",
+        "of_capital": "of capital", "conds": "{a}/{b} conditions", "full_table": "Full table (advanced)",
+        "ihsg_name": "Jakarta Composite Index", "ml_short": "ML model",
         "none_title": "No stock meets all conditions today.",
         "none_body": "Not buying is a valid decision. Forcing a trade without a signal is the most common "
                      "beginner mistake.",
@@ -70,7 +73,7 @@ T = {
                         "idx.co.id > Data Pasar > Ringkasan Perdagangan, then save it in data/foreign/ with the "
                         "date in the file name (YYYYMMDD).",
         # all stocks tab
-        "all_intro": "Every stock in the list, best match first. Hover over a column title for its meaning.",
+        "all_intro": "Every stock in the list, best match first.",
         "only_signal": "Show only full signals",
         "footer": "Backtest: past 5 years, buy at the next open after each signal, sell at stop loss, target or "
                   "time limit, fees included. Few trades means weak evidence.",
@@ -132,6 +135,9 @@ T = {
         "history_bad": "Pada saham ini, aturan yang sama rata-rata merugi pada masa lalu. Pertimbangkan jumlah lot "
                        "yang lebih kecil atau lewati saham ini.",
         "open_stockbit": "Buka {code} di Stockbit",
+        "cta_buy": "BELI {code} DI STOCKBIT", "total": "Total biaya", "maxloss": "Rugi maks.",
+        "of_capital": "dari modal", "conds": "{a}/{b} syarat", "full_table": "Tabel lengkap (lanjutan)",
+        "ihsg_name": "Indeks Harga Saham Gabungan", "ml_short": "Model ML",
         "none_title": "Hari ini belum ada saham yang memenuhi semua syarat.",
         "none_body": "Tidak membeli juga merupakan keputusan yang sah. Memaksakan transaksi tanpa sinyal adalah "
                      "kesalahan yang paling sering dilakukan pemula.",
@@ -156,8 +162,7 @@ T = {
         "foreign_none": "Aliran dana asing (*foreign flow*): belum ada berkas. Unduh 'Ringkasan Saham' (Excel) "
                         "untuk setiap hari dari idx.co.id > Data Pasar > Ringkasan Perdagangan, lalu simpan ke "
                         "data/foreign/ dengan tanggal pada nama berkas (YYYYMMDD).",
-        "all_intro": "Semua saham dalam daftar, urut dari yang paling cocok. Arahkan kursor ke judul kolom untuk "
-                     "melihat artinya.",
+        "all_intro": "Semua saham dalam daftar, urut dari yang paling cocok.",
         "only_signal": "Tampilkan hanya sinyal penuh",
         "footer": "Uji historis (*backtest*): lima tahun terakhir, beli pada harga pembukaan setelah setiap sinyal, "
                   "jual pada *stop loss*, target, atau batas waktu, sudah termasuk biaya. Jumlah transaksi yang "

@@ -1,7 +1,24 @@
 [theme]
-# teal primary: calm, not red/green so it never reads as gain or loss
-primaryColor = "#0E7C66"
-baseRadius = "medium"
+# Stockbit-style palette from stockbit.com (green #00AB6B, red #EE4A49, text #333333, borders #EDEDED).
+# Text/button greens and reds are darkened to pass WCAG 4.5:1 (#00AB6B on white is only 2.98:1).
+base = "light"
+primaryColor = "#007A4D"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F8FA"
+textColor = "#333333"
+greenColor = "#007A4D"
+redColor = "#C62F2E"
+linkColor = "#007A4D"
+borderColor = "#EDEDED"
+dataframeBorderColor = "#EDEDED"
+showWidgetBorder = true
+baseRadius = "small"
+# Nunito Sans: free, close to the Proxima Nova look
+font = "Nunito Sans:https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap, sans-serif"
+headingFontWeights = [800, 700, 700, 700, 700, 700]
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
 
 [server]
 headless = true

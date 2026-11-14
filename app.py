@@ -4,6 +4,7 @@ import streamlit as st
 
 import idx
 import ml
+import ui
 from texts import COLS, COND, GLOSSARY, T
 
 st.set_page_config(page_title="IDX Trader", page_icon=":material/candlestick_chart:", layout="wide")
@@ -98,15 +99,24 @@ if df.empty:
 
 st.caption(f":material/event: {t['kpi_date']} {df['date'].max().strftime('%d-%m-%Y')}")
 buys = df[df["signal"] & (df["lots"] > 0)]
-ihsg_chg = ihsg["Close"].pct_change().iloc[-1] * 100
-k1, k2, k3 = st.columns(3, border=True)
-k1.metric(t["kpi_buys"], len(buys))
-k2.metric(t["kpi_ihsg"], num(ihsg["Close"].iloc[-1]), pct(ihsg_chg, 2))
-k3.metric(t["kpi_ml"], t["ml_on"] if has_edge else t["ml_off"], help=t["auc_help"])
+
+
+def stock_row(code, chip=None):
+    """Watchlist row from price history: last close, change vs previous close, 30-day sparkline."""
+    c = data[code]["Close"] if code in data else ihsg["Close"]
+    name = t["ihsg_name"] if code == "IHSG" else idx.NAMES.get(code, "")
+    return ui.row(code, name, c.tail(30), c.iloc[-1], c.iloc[-1] - c.iloc[-2],
+                  (c.iloc[-1] / c.iloc[-2] - 1) * 100, num, chip)
+
+
+st.html(ui.CSS)
+st.markdown(stock_row("IHSG"), unsafe_allow_html=True)
+st.markdown(ui.stats([(t["kpi_buys"], str(len(buys))),
+                      (t["kpi_ml"], t["ml_on"] if has_edge else t["ml_off"])]), unsafe_allow_html=True)
 
 tab_rec, tab_ml, tab_all, tab_guide = st.tabs([
     f":material/thumb_up: {t['tab_rec']}", f":material/psychology: {t['tab_ml']}",
-    f":material/table_view: {t['tab_all']}", f":material/school: {t['tab_guide']}",
+    f":material/format_list_bulleted: {t['tab_all']}", f":material/school: {t['tab_guide']}",
 ])
 
 # ---------- recommendations ----------
@@ -114,19 +124,17 @@ with tab_rec:
     st.markdown(t["rec_intro"].format(n=len(cond_keys), mode=t[mode]))
     for _, r in buys.iterrows():
         with st.container(border=True):
-            h1, h2 = st.columns([3, 1], vertical_alignment="center")
-            h1.subheader(r["code"], anchor=False)
-            h1.badge(t["buy"], icon=":material/trending_up:", color="green")
-            h2.link_button(t["open_stockbit"].format(code=r["code"]), f"https://stockbit.com/symbol/{r['code']}",
-                           icon=":material/open_in_new:", type="primary", width="stretch")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric(t["entry"], num(r["entry"]))
-            m2.metric(t["stop"], num(r["stop"]), pct(r["loss%"], 2), help=t["stop_help"])
-            m3.metric(t["target"], num(r["target"]), "+" + pct((r["target"] / r["entry"] - 1) * 100, 2),
-                      help=t["target_help"])
-            m4.metric(t["lots"], num(r["lots"]), help=t["lots_help"])
-            st.markdown(t["money"].format(cost=num(r["cost_rp"]), maxloss=num(r["max_loss_rp"]),
-                                          pct=pct(r["max_loss_rp"] / capital * 100, 1)))
+            st.markdown(stock_row(r["code"], (t["buy"].upper(), "up")), unsafe_allow_html=True)
+            target_pct = (r["target"] / r["entry"] - 1) * 100
+            st.markdown(ui.ticket([
+                (t["entry"], num(r["entry"])),
+                (t["stop"], f"{num(r['stop'])} ({pct(r['loss%'], 2)})", "down"),
+                (t["target"], f"{num(r['target'])} (+{pct(target_pct, 2)})", "up"),
+                (t["lots"], f"{num(r['lots'])} lot = {num(r['lots'] * idx.LOT)} {'lembar' if lang == 'id' else 'shares'}"),
+                (t["total"], f"Rp {num(r['cost_rp'])}"),
+                (t["maxloss"], f"Rp {num(r['max_loss_rp'])} ({pct(r['max_loss_rp'] / capital * 100, 1)} {t['of_capital']})",
+                 "down"),
+            ]), unsafe_allow_html=True)
             st.markdown(f"**{t['why']}**")
             st.markdown("  \n".join(f":material/check_circle: {cond_text[k]}" for k in cond_keys))
             st.markdown(t["ml_line"].format(prob=pct(r["ml_prob"] * 100), base=pct(base_win))
@@ -135,6 +143,8 @@ with tab_rec:
                        if r["bt_trades"] else t["history_none"])
             if r["bt_trades"] and r["bt_avg%"] < 0:
                 st.warning(t["history_bad"], icon=":material/warning:")
+            st.link_button(t["cta_buy"].format(code=r["code"]), f"https://stockbit.com/symbol/{r['code']}",
+                           icon=":material/open_in_new:", type="primary", width="stretch")
 
     if buys.empty:
         st.info(f"**{t['none_title']}** {t['none_body']}", icon=":material/hourglass_empty:")
@@ -146,12 +156,11 @@ with tab_rec:
     if len(near):
         st.subheader(t["near_title"], anchor=False)
         st.caption(t["near_intro"])
-        cols = st.columns(3)
-        for i, (_, r) in enumerate(near.iterrows()):
+        html = ""
+        for _, r in near.iterrows():
             miss = next(k for k in cond_keys if not r[k])
-            with cols[i % 3].container(border=True):
-                st.markdown(f"**{r['code']}** · {num(r['close'])} ({'+' if r['chg%'] > 0 else ''}{pct(r['chg%'], 2)})")
-                st.caption(f":material/radio_button_unchecked: {t['near_missing'].format(cond=cond_text[miss])}")
+            html += stock_row(r["code"], (t["near_missing"].format(cond=cond_text[miss].split(":")[0]), "flat"))
+        st.markdown(html, unsafe_allow_html=True)
 
 # ---------- ML ----------
 with tab_ml:
@@ -180,9 +189,8 @@ with tab_ml:
         st.dataframe(wf, hide_index=True, width="stretch")
 
 # ---------- all stocks ----------
-with tab_all:
-    st.caption(t["all_intro"])
-    view = df[df["signal"]] if st.toggle(t["only_signal"]) else df
+def table(view):
+    """Full data table with labelled, explained columns (advanced users)."""
     money = {"close", "entry", "stop", "target", "cost_rp", "max_loss_rp"}
     config = {}
     for k, (label, hlp) in col_text.items():
@@ -200,6 +208,16 @@ with tab_all:
     order = ["code", "signal", "score", "ml_prob", "close", "chg%", "entry", "stop", "target", "loss%", "lots",
              "cost_rp", "max_loss_rp", *cond_keys, "rsi", "value20_bn", "bt_trades", "bt_win%", "bt_avg%"]
     st.dataframe(view, hide_index=True, width="stretch", column_config=config, column_order=order)
+
+
+with tab_all:
+    st.caption(t["all_intro"])
+    view = df[df["signal"]] if st.toggle(t["only_signal"]) else df
+    st.markdown("".join(stock_row(r["code"], (t["conds"].format(a=r["score"], b=len(cond_keys)),
+                                              "up" if r["signal"] else "flat"))
+                        for _, r in view.iterrows()), unsafe_allow_html=True)
+    with st.expander(t["full_table"], icon=":material/table_view:"):
+        table(view)
     st.caption(t["footer"])
 
 # ---------- guide ----------

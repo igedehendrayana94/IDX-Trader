@@ -11,6 +11,29 @@ UNIVERSE = (
     "PGAS PGEO PTBA SIDO SMGR SMRA TLKM TOWR UNTR UNVR"
 ).split()
 
+# shortcut: names hardcoded for the default list; unknown codes show no name
+NAMES = {
+    "AADI": "Adaro Andalan Indonesia Tbk.", "ACES": "Aspirasi Hidup Indonesia Tbk.",
+    "ADRO": "Alamtri Resources Indonesia Tbk.", "AKRA": "AKR Corporindo Tbk.",
+    "AMMN": "Amman Mineral Internasional Tbk.", "AMRT": "Sumber Alfaria Trijaya Tbk.",
+    "ANTM": "Aneka Tambang Tbk.", "ARTO": "Bank Jago Tbk.", "ASII": "Astra International Tbk.",
+    "BBCA": "Bank Central Asia Tbk.", "BBNI": "Bank Negara Indonesia (Persero) Tbk.",
+    "BBRI": "Bank Rakyat Indonesia (Persero) Tbk.", "BBTN": "Bank Tabungan Negara (Persero) Tbk.",
+    "BMRI": "Bank Mandiri (Persero) Tbk.", "BRIS": "Bank Syariah Indonesia Tbk.", "BRPT": "Barito Pacific Tbk.",
+    "CPIN": "Charoen Pokphand Indonesia Tbk.", "CTRA": "Ciputra Development Tbk.",
+    "ESSA": "ESSA Industries Indonesia Tbk.", "EXCL": "XLSMART Telecom Sejahtera Tbk.",
+    "GOTO": "GoTo Gojek Tokopedia Tbk.", "HRUM": "Harum Energy Tbk.", "ICBP": "Indofood CBP Sukses Makmur Tbk.",
+    "INCO": "Vale Indonesia Tbk.", "INDF": "Indofood Sukses Makmur Tbk.", "INKP": "Indah Kiat Pulp & Paper Tbk.",
+    "ISAT": "Indosat Tbk.", "ITMG": "Indo Tambangraya Megah Tbk.", "JPFA": "Japfa Comfeed Indonesia Tbk.",
+    "JSMR": "Jasa Marga (Persero) Tbk.", "KLBF": "Kalbe Farma Tbk.", "MAPA": "Map Aktif Adiperkasa Tbk.",
+    "MAPI": "Mitra Adiperkasa Tbk.", "MBMA": "Merdeka Battery Materials Tbk.", "MDKA": "Merdeka Copper Gold Tbk.",
+    "MEDC": "Medco Energi Internasional Tbk.", "PGAS": "Perusahaan Gas Negara Tbk.",
+    "PGEO": "Pertamina Geothermal Energy Tbk.", "PTBA": "Bukit Asam Tbk.",
+    "SIDO": "Industri Jamu dan Farmasi Sido Muncul Tbk.", "SMGR": "Semen Indonesia (Persero) Tbk.",
+    "SMRA": "Summarecon Agung Tbk.", "TLKM": "Telkom Indonesia (Persero) Tbk.",
+    "TOWR": "Sarana Menara Nusantara Tbk.", "UNTR": "United Tractors Tbk.", "UNVR": "Unilever Indonesia Tbk.",
+}
+
 BUY_FEE, SELL_FEE = 0.0015, 0.0025  # typical IDX broker fee; sell includes 0.1% final tax
 MAX_LOSS = 0.05  # user rule: stop loss never more than 5% below entry
 LOT = 100
