@@ -107,28 +107,40 @@ def plan(entry, atr, mode, capital, max_alloc):
     return stop, target, lots
 
 
+def outcome(arr, i, mode):
+    """Trade from a signal on day i: enter next open, exit at stop/target/time. Returns (net return, exit index)."""
+    o, h, l, c, atr = arr
+    hold, n = MODES[mode]["hold"], len(c)
+    e = i + 1
+    entry = o[e]
+    stop, target, _ = plan(entry, atr[i], mode, 0, 0)
+    j = min(e + hold - 1, n - 1)
+    exit_px = c[j]
+    for k in range(e, j + 1):
+        if l[k] <= stop:  # assume stop hit first when both touched (conservative)
+            exit_px, j = min(stop, o[k]), k
+            break
+        if h[k] >= target:
+            exit_px, j = max(target, o[k]), k
+            break
+    return exit_px * (1 - SELL_FEE) / (entry * (1 + BUY_FEE)) - 1, j
+
+
+def ohlca(d):
+    return tuple(d[k].to_numpy() for k in ("Open", "High", "Low", "Close", "atr"))
+
+
 def backtest(d, mode):
-    """Enter next open after each signal, exit at stop/target/time. One position at a time, fees included."""
-    m = MODES[mode]
+    """Rule signals, one position at a time, fees included."""
     sig = conditions(d, mode).all(axis=1).to_numpy()
-    o, h, l, c, atr = (d[k].to_numpy() for k in ("Open", "High", "Low", "Close", "atr"))
+    arr = ohlca(d)
     rets, i, n = [], 50, len(d)
     while i < n - 1:
         if not sig[i]:
             i += 1
             continue
-        e = i + 1
-        entry = o[e]
-        stop, target, _ = plan(entry, atr[i], mode, 0, 0)
-        exit_px, j = c[min(e + m["hold"] - 1, n - 1)], min(e + m["hold"] - 1, n - 1)
-        for k in range(e, min(e + m["hold"], n)):
-            if l[k] <= stop:  # assume stop hit first when both touched (conservative)
-                exit_px, j = min(stop, o[k]), k
-                break
-            if h[k] >= target:
-                exit_px, j = max(target, o[k]), k
-                break
-        rets.append(exit_px * (1 - SELL_FEE) / (entry * (1 + BUY_FEE)) - 1)
+        r, j = outcome(arr, i, mode)
+        rets.append(r)
         i = j + 1
     if not rets:
         return {"trades": 0, "win_rate": None, "avg_ret": None}
