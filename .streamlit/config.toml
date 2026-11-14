@@ -1,0 +1,7 @@
+[theme]
+# teal primary: calm, not red/green so it never reads as gain or loss
+primaryColor = "#0E7C66"
+baseRadius = "medium"
+
+[server]
+headless = true
