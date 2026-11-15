@@ -161,16 +161,26 @@ def conditions(d, mode):
     })
 
 
-def plan(entry, atr, mode, capital, max_alloc):
-    """Stop, target, lots for one trade. Stop capped at MAX_LOSS below entry."""
+def size_lots(capital, risk_pct, entry, stop, max_alloc, factor=1.0):
+    """Lots so that hitting the stop loses at most risk_pct of capital (fees included),
+    capped by the max allocation per stock. factor scales the risk (market regime)."""
+    if stop >= entry or factor <= 0:
+        return 0
+    loss_per_share = entry * (1 + BUY_FEE) - stop * (1 - SELL_FEE)
+    by_risk = capital * risk_pct / 100 * factor / (loss_per_share * LOT)
+    by_cash = capital * max_alloc / (entry * LOT * (1 + BUY_FEE))
+    return max(0, math.floor(min(by_risk, by_cash)))
+
+
+def plan(entry, atr, mode, capital, max_alloc, risk_pct=1.0, factor=1.0):
+    """Stop, target, lots for one trade. Stop capped at MAX_LOSS below entry; lots sized by risk."""
     m = MODES[mode]
     stop = max(entry - m["atr_mult"] * atr, entry * (1 - MAX_LOSS))
     stop = round_tick(stop, up=True)  # rounding up keeps loss within the cap
     if stop >= entry:
         stop = entry - tick(entry)
     target = round_tick(entry + m["rr"] * (entry - stop))
-    lots = int(capital * max_alloc // (entry * LOT * (1 + BUY_FEE)))
-    return stop, target, lots
+    return stop, target, size_lots(capital, risk_pct, entry, stop, max_alloc, factor)
 
 
 def outcome(arr, i, mode):
@@ -214,7 +224,7 @@ def backtest(d, mode):
     return {"trades": len(s), "win_rate": (s > 0).mean(), "avg_ret": s.mean()}
 
 
-def screen(data, mode, capital, max_alloc, min_value):
+def screen(data, mode, capital, max_alloc, min_value, risk_pct=1.0, factor=1.0):
     rows = []
     for code, df in data.items():
         d = indicators(df)
@@ -223,7 +233,7 @@ def screen(data, mode, capital, max_alloc, min_value):
             continue
         cond = conditions(d, mode).iloc[-1]
         entry = float(last["Close"])
-        stop, target, lots = plan(entry, float(last["atr"]), mode, capital, max_alloc)
+        stop, target, lots = plan(entry, float(last["atr"]), mode, capital, max_alloc, risk_pct, factor)
         bt = backtest(d, mode)
         rows.append({
             "code": code, "date": d.index[-1].date(), "score": int(cond.sum()), "signal": bool(cond.all()),

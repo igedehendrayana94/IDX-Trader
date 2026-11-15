@@ -52,19 +52,25 @@ def drop_unfinished(df, now):
     return df
 
 
+def hold_days(mode):
+    """Max trading days to hold; ORB day trades are sold the same day."""
+    return idx.MODES[mode]["hold"] if mode in idx.MODES else 1
+
+
 def schedule(signal_day, mode):
     """Dates for a signal from the close of signal_day: buy day and last day to sell by time limit."""
     buy_day = next_trading_day(signal_day)
-    return {"buy_day": buy_day, "exit_deadline": next_trading_day(buy_day, idx.MODES[mode]["hold"] - 1)}
+    return {"buy_day": buy_day, "exit_deadline": next_trading_day(buy_day, hold_days(mode) - 1)}
 
 
-def exit_check(d, buy_day, entry, mode):
+def exit_check(d, buy_day, entry, mode, stop=None, target=None):
     """Hold or sell for a position bought on buy_day at entry. d = idx.indicators() frame.
-    Uses the same stop/target as the buy plan (ATR of the day before buying)."""
+    stop/target: the ones saved with the position; otherwise the buy plan's (ATR of the day before buying)."""
     before, since = d[d.index.date < buy_day], d[d.index.date >= buy_day]
     if before.empty:
         raise ValueError("no price history before the buy date")
-    stop, target, _ = idx.plan(entry, float(before["atr"].iloc[-1]), mode, 0, 0)
+    if stop is None or target is None:
+        stop, target, _ = idx.plan(entry, float(before["atr"].iloc[-1]), mode, 0, 0)
     deadline = schedule(before.index[-1].date(), mode)["exit_deadline"]
     out = {"stop": stop, "target": target, "deadline": deadline, "days": len(since), "last": None, "pnl": 0.0}
     if since.empty:
@@ -76,7 +82,7 @@ def exit_check(d, buy_day, entry, mode):
         out["action"] = "sell_stop"
     elif (since["High"] >= target).any():
         out["action"] = "sell_target"
-    elif len(since) >= idx.MODES[mode]["hold"]:
+    elif len(since) >= hold_days(mode):
         out["action"] = "sell_time"
     elif mode == "swing" and last < float(since["ema20"].iloc[-1]):
         out["action"] = "warn_trend"  # trend broke before stop/target: tighten or exit early
@@ -112,4 +118,7 @@ if __name__ == "__main__":
     assert exit_check(d, date(2026, 11, 3), 1000, "daily")["action"] == "sell_time"
     unfinished = drop_unfinished(base, at(2026, 11, 13, 10, 0))
     assert len(unfinished) == len(base) - 1 and len(drop_unfinished(base, at(2026, 11, 13, 17, 0))) == len(base)
+    assert exit_check(d, date(2026, 11, 13), 1000, "orb", stop=985, target=1015)["action"] == "sell_time"
+    assert exit_check(d, date(2026, 11, 13), 1000, "orb", stop=995, target=1005)["action"] == "sell_stop"
+    assert schedule(date(2026, 11, 13), "orb")["exit_deadline"] == date(2026, 11, 16)
     print("ok")

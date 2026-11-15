@@ -1,4 +1,3 @@
-import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -6,18 +5,23 @@ from pathlib import Path
 import streamlit as st
 
 import idx
+import journal
 import ml
+import orb
+import risk
 import timing
 import ui
 from texts import COLS, COND, GLOSSARY, T
 
 st.set_page_config(page_title="IDX Trader", page_icon=":material/candlestick_chart:", layout="wide")
 
-FOREIGN_DIR = Path(__file__).parent / "data" / "foreign"
-POSITIONS = Path(__file__).parent / "data" / "positions.json"
+DATA_DIR = Path(__file__).parent / "data"
+FOREIGN_DIR = DATA_DIR / "foreign"
+POSITIONS = DATA_DIR / "positions.json"
+JOURNAL = DATA_DIR / "journal.json"
 FOREIGN_MIN_DAYS = 60  # fewer days = feature mostly empty in training, no point using it
 
-# ---------- sidebar: only the 2 choices a beginner must make are visible ----------
+# ---------- sidebar: only the choices a beginner must make are visible ----------
 with st.sidebar:
     lang = st.segmented_control("Language / Bahasa", ["id", "en"], default="id", required=True,
                                 format_func=lambda k: {"id": "Indonesia", "en": "English"}[k])
@@ -34,6 +38,10 @@ def pct(x, dec=0):
     return f"{num(x, dec)}%"
 
 
+def day_name(d):
+    return f"{t['days'][d.weekday()]}, {d.strftime('%d-%m-%Y')}"
+
+
 with st.sidebar:
     mode = st.radio(t["mode"], ["swing", "daily"], format_func=lambda m: t[m],
                     captions=[t["swing_cap"], t["daily_cap"]])
@@ -46,8 +54,12 @@ with st.sidebar:
     if capital < 1_000_000:
         st.error(t["capital_min"], icon=":material/error:")
         st.stop()
+    risk_pct = st.slider(t["risk_pct"], 0.5, 2.0, 1.0, 0.5, help=t["risk_help"], format="%.1f%%")
     with st.expander(t["advanced"], icon=":material/tune:"):
         max_alloc = st.slider(t["alloc"], 5, 100, 25, 5, help=t["alloc_help"]) / 100
+        daily_loss = st.slider(t["daily_loss"], 1.0, 5.0, 3.0, 0.5, format="%.1f%%")
+        max_open = st.number_input(t["max_open"], 1, 10, 5)
+        max_trades = st.number_input(t["max_trades"], 1, 10, 3)
         min_value = st.number_input(t["min_value"], min_value=0.0, value=5.0, step=1.0,
                                     help=t["min_value_help"]) * 1e9
         codes = st.text_area(t["universe"], " ".join(idx.UNIVERSE), height=160)
@@ -55,6 +67,8 @@ with st.sidebar:
     refresh = st.button(t["refresh"], icon=":material/refresh:", width="stretch")
     st.caption(t["rules"].format(loss=pct(idx.MAX_LOSS * 100), buy=pct(idx.BUY_FEE * 100, 2),
                                  sell=pct(idx.SELL_FEE * 100, 2)))
+limits = {**risk.DEFAULT_LIMITS, "risk_pct": risk_pct, "daily_loss_pct": daily_loss,
+          "max_open": max_open, "max_trades_day": max_trades}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -78,6 +92,17 @@ def load_tv(codes, interval):
     return idx.tv_ratings(list(codes), interval)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_intraday(codes):
+    return orb.fetch_intraday(list(codes))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_timemachine(codes, today):
+    bars = load_intraday(codes)
+    return {c: orb.timemachine(b, today) for c, b in bars.items()}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def train(code_list, mode, use_ihsg, use_foreign):
     p = ml.dataset(load(code_list), mode, ihsg=load_ihsg() if use_ihsg else None,
@@ -86,14 +111,18 @@ def train(code_list, mode, use_ihsg, use_foreign):
 
 
 if refresh:
-    for f in (load, load_ihsg, load_foreign, train):
+    for f in (load, load_ihsg, load_foreign, load_tv, load_intraday, load_timemachine, train):
         f.clear()
 
 # ---------- data ----------
 code_list = tuple(sorted({c.strip().upper() for c in codes.split() if c.strip()}))
 with st.spinner(t["downloading"]):
     data, ihsg = load(code_list), load_ihsg()
-df = idx.screen(data, mode, capital, max_alloc, min_value)
+reg = risk.regime_series(data, ihsg).iloc[-1] if data else None
+light = reg["light"] if reg is not None else "yellow"
+factor = 0.5 if light == "yellow" else 1.0  # red keeps full plan for learning; the risk gate blocks the buy
+df = idx.screen(data, mode, capital, max_alloc, min_value, risk_pct, factor)
+positions, trades = journal.load(POSITIONS), journal.load(JOURNAL)
 foreign_days = load_foreign()["date"].nunique()
 use_foreign = foreign_days >= FOREIGN_MIN_DAYS
 if not df.empty:
@@ -114,10 +143,6 @@ if missing:
 if df.empty:
     st.info(t["no_liquid"], icon=":material/info:")
     st.stop()
-
-def day_name(d):
-    return f"{t['days'][d.weekday()]}, {d.strftime('%d-%m-%Y')}"
-
 
 now = datetime.now(timing.WIB)
 phase, when = timing.market_status(now)
@@ -145,17 +170,57 @@ def stock_row(code, chip=None):
                   (c.iloc[-1] / c.iloc[-2] - 1) * 100, num, chip)
 
 
+def show_gate(checks, with_window=False):
+    """Render the pre-trade checklist; returns True when every check passes."""
+    fmt = {
+        "regime": lambda d: {"light": t["light"][d["light"]]},
+        "rr": lambda d: {"rr": num(d["rr"], 1), "min": num(d["min"], 1)},
+        "cash": lambda d: {"need": num(d["need"]), "free": num(d["free"])},
+        "daily_loss": lambda d: {"loss": num(d["loss"]), "max": num(d["max"])},
+        "streak": lambda d: {"n": d["n"], "until": day_name(d["until"]) if d["until"] else ""},
+    }
+    lines = []
+    for key, ok, d in checks:
+        if key == "window" and not with_window:
+            continue
+        text = t["gate"][key][0 if ok else 1].format(**fmt.get(key, lambda x: x)(d))
+        lines.append(f"{':material/check_circle:' if ok else ':material/cancel:'} {text}")
+    ok_all = risk.passed(checks)
+    st.markdown(f"**{t['gate_title']}**")
+    st.markdown("  \n".join(lines))
+    (st.success if ok_all else st.error)(t["gate_pass"] if ok_all else t["gate_block"],
+                                         icon=":material/verified_user:" if ok_all else ":material/block:")
+    return ok_all
+
+
+def add_position(code, pos_mode, price, lots, stop, target, key):
+    if st.button(t["bought"], key=key, icon=":material/add_task:", width="stretch"):
+        positions.append({"code": code, "mode": pos_mode, "date": now.date().isoformat(), "price": float(price),
+                          "lots": int(lots), "stop": float(stop), "target": float(target)})
+        journal.save(POSITIONS, positions)
+        st.toast(t["bought_ok"], icon=":material/check:")
+        st.rerun(scope="app")  # positions and risk checks change everywhere
+
+
 st.html(ui.CSS)
 st.markdown(stock_row("IHSG"), unsafe_allow_html=True)
-st.markdown(ui.stats([(t["kpi_buys"], str(len(buys))),
+st.markdown(ui.stats([(t["kpi_regime"], t["light"][light]), (t["kpi_buys"], str(len(buys))),
                       (t["kpi_ml"], t["ml_on"] if has_edge else t["ml_off"])]), unsafe_allow_html=True)
+if reg is not None:
+    reasons = [t["reg_ihsg"][0 if reg["ihsg_up"] else 1], t["reg_ema"][0 if reg["ema_rising"] else 1],
+               t["reg_breadth"].format(x=pct(reg["breadth"])), t["reg_dist"].format(n=int(reg["dist_days"]))]
+    box = {"green": st.success, "yellow": st.warning, "red": st.error}[light]
+    box(f"**{t['regime_title'].format(light=t['light'][light])}** · {t['regime_do'][light]}  \n"
+        + " · ".join(reasons), icon=":material/traffic:")
+    st.caption(t["reg_dist_help"])
 
-tab_rec, tab_pos, tab_ml, tab_all, tab_guide = st.tabs([
-    f":material/thumb_up: {t['tab_rec']}", f":material/work: {t['tab_pos']}", f":material/psychology: {t['tab_ml']}",
+tab_rec, tab_orb, tab_pos, tab_jr, tab_ml, tab_all, tab_guide = st.tabs([
+    f":material/thumb_up: {t['tab_rec']}", f":material/bolt: {t['tab_orb']}", f":material/work: {t['tab_pos']}",
+    f":material/menu_book: {t['tab_journal']}", f":material/psychology: {t['tab_ml']}",
     f":material/format_list_bulleted: {t['tab_all']}", f":material/school: {t['tab_guide']}",
 ])
 
-# ---------- recommendations ----------
+# ---------- recommendations (swing / daily) ----------
 with tab_rec:
     st.markdown(t["rec_intro"].format(n=len(cond_keys), mode=t[mode]))
     tv_codes = tuple(buys["code"])
@@ -190,8 +255,12 @@ with tab_rec:
                 (t["plan_check"], t["plan_check_v"]),
                 (t["plan_exit"], t["plan_exit_v"].format(day=day_name(sch["exit_deadline"])), "down"),
             ]), unsafe_allow_html=True)
+            ok = show_gate(risk.gate(r["entry"], r["stop"], r["target"], r["lots"], capital, light, positions,
+                                     trades, now.date(), limits))
             st.link_button(t["cta_buy"].format(code=r["code"]), f"https://stockbit.com/symbol/{r['code']}",
-                           icon=":material/open_in_new:", type="primary", width="stretch")
+                           icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
+            if ok:
+                add_position(r["code"], mode, r["entry"], r["lots"], r["stop"], r["target"], f"buy_{r['code']}")
 
     if buys.empty:
         st.info(f"**{t['none_title']}** {t['none_body']}", icon=":material/hourglass_empty:")
@@ -209,27 +278,101 @@ with tab_rec:
             html += stock_row(r["code"], (t["near_missing"].format(cond=cond_text[miss].split(":")[0]), "flat"))
         st.markdown(html, unsafe_allow_html=True)
 
+
+# ---------- day trading: opening range breakout ----------
+ORB_ORDER = ["open", "waiting", "forming", "target", "stop", "time", "expired", "no_range"]
+ORB_CSS = {"open": "up", "target": "up", "stop": "down", "time": "flat"}
+
+
+@st.fragment(run_every=300 if phase in ("pre_open", "session1", "break", "session2", "pre_close") else None)
+def orb_view():
+    st.markdown(t["orb_intro"])
+    st.caption(f":material/schedule: {t['orb_delay']}")
+    liquid = tuple(df["code"])
+    bars = load_intraday(liquid)
+    if not bars:
+        st.info(t["no_data"] + " 5m", icon=":material/info:")
+        return
+    tm = load_timemachine(liquid, now.date())
+    done = {c: s for c, s in tm.items() if s["trades"]}
+    n = sum(s["trades"] for s in done.values())
+    if n:
+        win = sum(s["win%"] * s["trades"] for s in done.values()) / n
+        avg = sum(s["avg%"] * s["trades"] for s in done.values()) / n
+        st.subheader(t["orb_tm_title"], anchor=False)
+        (st.success if avg > 0 else st.error)(
+            t["orb_tm"].format(trades=n, stocks=len(done), win=pct(win), avg=pct(avg, 2)) + " "
+            + (t["orb_tm_good"] if avg > 0 else t["orb_tm_bad"]),
+            icon=":material/history:")
+        with st.expander(t["orb_table"], icon=":material/table_view:"):
+            st.dataframe(
+                [{"code": c, **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in s.items()}}
+                 for c, s in sorted(done.items(), key=lambda x: -x[1]["avg%"])],
+                hide_index=True, width="stretch")
+
+    latest = max(b.index[-1].date() for b in bars.values())
+    live = latest == now.date() and phase != "closed"
+    st.subheader(t["orb_live"] if live else t["orb_last"].format(day=day_name(latest)), anchor=False)
+    results = {}
+    for c, b in bars.items():
+        g = b[b.index.date == latest]
+        if len(g):
+            results[c] = (g, orb.day(g, now if live else None))
+    html = ""
+    for c, (g, res) in sorted(results.items(), key=lambda x: ORB_ORDER.index(x[1][1]["status"])):
+        prev = data[c]["Close"][data[c].index.date < latest]
+        last = float(g["Close"].iloc[-1])
+        chip = t["orb_status"][res["status"]]
+        if "ret" in res:
+            chip += f" {'+' if res['ret'] > 0 else ''}{pct(res['ret'] * 100, 2)}"
+        html += ui.row(c, idx.NAMES.get(c, ""), g["Close"], last, last - prev.iloc[-1],
+                       (last / prev.iloc[-1] - 1) * 100, num, (chip, ORB_CSS.get(res["status"], "flat")))
+        if live and res["status"] == "open":
+            st.markdown(html, unsafe_allow_html=True)
+            html = ""
+            orb_card(c, res)
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def orb_card(code, res):
+    entry, stop, target = res["entry"], res["stop"], res["target"]
+    lots = risk.size_lots(capital, risk_pct, entry, stop, max_alloc, factor)
+    with st.container(border=True):
+        st.markdown(ui.ticket([
+            (t["orb_range"], f"{num(res['lo'])} – {num(res['hi'])}"),
+            (t["orb_trigger"], f"{res['trigger_time']:%H:%M} WIB"),
+            (t["entry"], num(entry)),
+            (t["stop"], f"{num(stop)} ({pct((stop / entry - 1) * 100, 2)})", "down"),
+            (t["target"], f"{num(target)} (+{pct((target / entry - 1) * 100, 2)})", "up"),
+            (t["lots"], f"{num(lots)} lot"),
+            (t["total"], f"Rp {num(lots * idx.LOT * entry * (1 + idx.BUY_FEE))}"),
+            (t["plan_exit"], t["orb_exit"], "down"),
+        ]), unsafe_allow_html=True)
+        chased = (res["last"] - entry) / (entry - stop)
+        if chased > 0.5:
+            st.warning(t["orb_chase"].format(r=num(chased, 1)), icon=":material/directions_run:")
+        ok = show_gate(risk.gate(entry, stop, target, lots, capital, light, positions, trades, now.date(), limits,
+                                 window_open=now.time() < orb.ENTRY_CUTOFF), with_window=True) and chased <= 0.5
+        st.link_button(t["cta_buy"].format(code=code), f"https://stockbit.com/symbol/{code}",
+                       icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
+        if ok:
+            add_position(code, "orb", entry, lots, stop, target, f"orb_{code}")
+
+
+with tab_orb:
+    orb_view()
+
 # ---------- my positions ----------
-def read_positions():
-    try:
-        return json.loads(POSITIONS.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-
-def write_positions(rows):
-    POSITIONS.parent.mkdir(parents=True, exist_ok=True)
-    POSITIONS.write_text(json.dumps(rows, indent=1))
-
+MODES_ALL = ["swing", "daily", "orb"]
+EXIT_REASON = {"sell_stop": "stop", "sell_target": "target", "sell_time": "time"}
 
 with tab_pos:
-    positions = read_positions()
     with st.expander(t["add_pos"], icon=":material/add:", expanded=not positions):
         with st.form("add_position", clear_on_submit=True, border=False):
             f1, f2 = st.columns(2)
             p_code = f1.selectbox(t["pos_code"], sorted(data))
-            p_mode = f2.radio(t["pos_mode"], ["swing", "daily"], format_func=lambda m: t[m], horizontal=True,
-                              index=0 if mode == "swing" else 1)
+            p_mode = f2.radio(t["pos_mode"], MODES_ALL, format_func=lambda m: t[m], horizontal=True,
+                              index=MODES_ALL.index(mode))
             f3, f4, f5 = st.columns(3)
             p_date = f3.date_input(t["pos_date"], value=now.date(), max_value=now.date(), format="DD/MM/YYYY")
             p_price = f4.number_input(t["pos_price"], min_value=0, step=5)
@@ -238,7 +381,7 @@ with tab_pos:
                 if p_price > 0 and p_lots >= 1 and p_date <= now.date():
                     positions.append({"code": p_code, "mode": p_mode, "date": p_date.isoformat(),
                                       "price": float(p_price), "lots": int(p_lots)})
-                    write_positions(positions)
+                    journal.save(POSITIONS, positions)
                     st.success(t["pos_saved"], icon=":material/check:")
                 else:
                     st.error(t["pos_bad"], icon=":material/error:")
@@ -252,11 +395,12 @@ with tab_pos:
             st.warning(t["no_data"] + p["code"], icon=":material/warning:")
             continue
         try:
-            ex = timing.exit_check(idx.indicators(data[p["code"]]), buy_day, p["price"], p["mode"])
+            ex = timing.exit_check(idx.indicators(data[p["code"]]), buy_day, p["price"], p["mode"],
+                                   p.get("stop"), p.get("target"))
         except ValueError:
             st.warning(t["pos_err"].format(code=p["code"], day=day_name(buy_day)), icon=":material/warning:")
             continue
-        hold = idx.MODES[p["mode"]]["hold"]
+        hold = timing.hold_days(p["mode"])
         action = ex["action"]
         if action == "hold" and now.date() == ex["deadline"] and phase != "closed":
             action = "hold_last"
@@ -276,14 +420,54 @@ with tab_pos:
             box = st.success if css == "up" else st.error if css == "down" else st.info
             box(f"**{label}** · " + advice.format(stop=num(ex["stop"]), target=num(ex["target"]), m=hold),
                 icon=":material/campaign:")
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns(3)
             b1.link_button(t["open_stockbit"].format(code=p["code"]), f"https://stockbit.com/symbol/{p['code']}",
                            icon=":material/open_in_new:", width="stretch")
-            with b2.popover(t["pos_delete"], icon=":material/delete:", width="stretch"):
+            with b2.popover(t["close_pos"], icon=":material/sell:", width="stretch"):
+                x_price = st.number_input(t["exit_price"], min_value=1, step=5, key=f"xp{i}",
+                                          value=int(ex["last"] or p["price"]))
+                x_date = st.date_input(t["exit_date"], value=now.date(), min_value=buy_day, max_value=now.date(),
+                                       format="DD/MM/YYYY", key=f"xd{i}")
+                reasons = list(t["reasons"])
+                x_reason = st.selectbox(t["exit_reason"], reasons, format_func=lambda k: t["reasons"][k], key=f"xr{i}",
+                                        index=reasons.index(EXIT_REASON.get(ex["action"], "manual")))
+                if st.button(t["close_pos"], key=f"close{i}", type="primary"):
+                    trades.append(journal.close(p, float(x_price), x_date, x_reason, ex["stop"]))
+                    journal.save(JOURNAL, trades)
+                    journal.save(POSITIONS, positions[:i] + positions[i + 1:])
+                    st.toast(t["close_ok"], icon=":material/check:")
+                    st.rerun()
+            with b3.popover(t["pos_delete"], icon=":material/delete:", width="stretch"):
                 st.write(t["pos_confirm"].format(code=p["code"]))
                 if st.button(t["pos_delete"], key=f"del{i}", type="primary"):
-                    write_positions(positions[:i] + positions[i + 1:])
+                    journal.save(POSITIONS, positions[:i] + positions[i + 1:])
                     st.rerun()
+
+# ---------- journal ----------
+with tab_jr:
+    s = journal.stats(trades)
+    if not s:
+        st.info(t["j_none"], icon=":material/info:")
+    else:
+        m = st.columns(3, border=True)
+        m[0].metric(t["j_trades"], s["n"])
+        m[1].metric(t["j_win"], pct(s["win%"]))
+        m[2].metric(t["j_total"], f"Rp {num(s['total'])}")
+        m = st.columns(3, border=True)
+        m[0].metric(t["j_exp"], f"Rp {num(s['expectancy'])}")
+        m[1].metric(t["j_pf"], num(s["profit_factor"], 2) if s["profit_factor"] is not None else "-", help=t["j_pf_help"])
+        m[2].metric(t["j_r"], num(s["avg_r"], 2) if s["avg_r"] is not None else "-", help=t["j_r_help"])
+        for note in journal.coach(trades, s):
+            (st.success if note == "positive" else st.info if note == "few_trades" else st.warning)(
+                t["coach"][note], icon=":material/sports:")
+        st.subheader(t["j_weekly"], anchor=False)
+        st.dataframe(journal.weekly(trades), hide_index=True, width="stretch", column_config={
+            "week": t["j_week"], "trades": t["j_trades"],
+            "win": st.column_config.NumberColumn(t["j_win"], format="%.0f%%"),
+            "pnl_rp": st.column_config.NumberColumn(t["j_pnl"], format="localized"),
+        })
+        st.subheader(t["j_list"], anchor=False)
+        st.dataframe(sorted(trades, key=lambda j: j["exit_date"], reverse=True), hide_index=True, width="stretch")
 
 # ---------- ML ----------
 with tab_ml:
@@ -311,6 +495,7 @@ with tab_ml:
     with details:
         st.caption(t["ml_tech"])
         st.dataframe(wf, hide_index=True, width="stretch")
+
 
 # ---------- all stocks ----------
 def table(view):
