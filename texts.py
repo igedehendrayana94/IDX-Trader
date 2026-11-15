@@ -12,6 +12,7 @@ T = {
         "swing_cap": "Hold a few days, up to 10. Calmer, fewer checks per day.",
         "daily_cap": "Buy at the open, sell within the day. Needs you to watch the market.",
         "capital": "Your capital (Rp)", "capital_help": "Money you are ready to use for trading. Use money you can afford to lose.",
+        "capital_ph": "Example: 1,000,000", "capital_min": "Minimum capital is Rp 1,000,000. Example: 1,000,000",
         "advanced": "Advanced settings",
         "alloc": "Max share of capital per stock (%)",
         "alloc_help": "Spreading money across several stocks lowers the damage from one bad trade.",
@@ -136,7 +137,8 @@ T = {
         "mode": "Gaya trading", "swing": "*Swing*", "daily": "Harian",
         "swing_cap": "Tahan beberapa hari, paling lama 10 hari. Lebih santai, tidak perlu sering memantau.",
         "daily_cap": "Beli saat pasar buka, jual pada hari yang sama. Perlu memantau pasar.",
-        "capital": "Modal (Rp)", "capital_help": "Uang yang siap dipakai untuk trading. Pakai uang yang siap "
+        "capital": "Modal (Rp)", "capital_ph": "Contoh: 1.000.000",
+        "capital_min": "Modal minimal Rp 1.000.000. Contoh: 1.000.000", "capital_help": "Uang yang siap dipakai untuk trading. Pakai uang yang siap "
                                                  "ditanggung jika rugi.",
         "advanced": "Pengaturan lanjutan",
         "alloc": "Porsi modal maksimum per saham (%)",

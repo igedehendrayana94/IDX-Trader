@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -36,8 +37,15 @@ def pct(x, dec=0):
 with st.sidebar:
     mode = st.radio(t["mode"], ["swing", "daily"], format_func=lambda m: t[m],
                     captions=[t["swing_cap"], t["daily_cap"]])
-    capital = st.number_input(t["capital"], min_value=1_000_000, value=10_000_000, step=1_000_000,
-                              help=t["capital_help"])
+    # text box instead of number_input: number_input cannot show thousand separators (10.000.000)
+    digits = re.sub(r"\D", "", st.session_state.get("capital_txt", "10000000"))
+    st.session_state.capital_txt = num(int(digits)) if digits else ""
+    st.text_input(t["capital"], key="capital_txt", placeholder=t["capital_ph"], help=t["capital_help"])
+    st.caption(t["capital_ph"])
+    capital = int(digits) if digits else 0
+    if capital < 1_000_000:
+        st.error(t["capital_min"], icon=":material/error:")
+        st.stop()
     with st.expander(t["advanced"], icon=":material/tune:"):
         max_alloc = st.slider(t["alloc"], 5, 100, 25, 5, help=t["alloc_help"]) / 100
         min_value = st.number_input(t["min_value"], min_value=0.0, value=5.0, step=1.0,
