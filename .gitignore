@@ -3,3 +3,4 @@ __pycache__/
 .playwright-mcp/
 data/foreign/*
 !data/foreign/.gitkeep
+data/positions.json

@@ -46,3 +46,9 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 - `ui.py`: HTML parts (CSS tokens, watchlist row with 30-day SVG sparkline, change "+94 (+1,78%)" with sign always shown, order-ticket rows, stats strip). `python ui.py` = self-check incl. HTML escaping of user codes.
 - Header = IHSG watchlist row + stats strip. Buy card = watchlist row + BELI chip + order ticket + reasons + full-width "BELI {code} DI STOCKBIT" button. "Semua saham" = watchlist with "3/4 syarat" chips; dataframe moved into "Tabel lengkap" expander.
 - Company names hardcoded in `idx.NAMES` for the default list.
+
+## Entry/exit timing (2026-11-15)
+- `timing.py`: IDX session clock (WIB; pre-open 08:45-09:00, sesi 1 09:00-12:00 / Fri 11:30, sesi 2 13:30 / Fri 14:00 - 15:50, pre-close 15:50-16:00), next trading day (weekends only: IDX holidays NOT included), `schedule()` buy day + sell-by date, `exit_check()` hold/sell for a position, `drop_unfinished()` removes today's partial bar before 16:15 WIB (bug fix: a mid-session bar was treated as a closed signal day). `python timing.py` = self-check.
+- Exit rules for a position: stop/target from the same plan (ATR of the day before buying); order: stop hit -> SELL, target hit -> SELL take profit, days >= hold -> SELL (time), swing close < EMA20 -> CONSIDER SELLING, else HOLD; on the deadline day during market hours -> SELL TODAY at pre-close.
+- UI: header status line (market phase + next open), buy card "Kapan bertindak" ticket (order in pre-opening at limit price, Auto Order SL/TP, daily check after 16:15, sell-by date), tab "Posisi saya" (form, saved to `data/positions.json`, gitignored; delete asks for confirmation), guide box with IDX hours.
+- ML stays gradient boosting (best fit for tabular indicators); exit advice is rule-based, not ML.

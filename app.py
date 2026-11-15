@@ -1,15 +1,19 @@
+import json
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
 
 import idx
 import ml
+import timing
 import ui
 from texts import COLS, COND, GLOSSARY, T
 
 st.set_page_config(page_title="IDX Trader", page_icon=":material/candlestick_chart:", layout="wide")
 
 FOREIGN_DIR = Path(__file__).parent / "data" / "foreign"
+POSITIONS = Path(__file__).parent / "data" / "positions.json"
 FOREIGN_MIN_DAYS = 60  # fewer days = feature mostly empty in training, no point using it
 
 # ---------- sidebar: only the 2 choices a beginner must make are visible ----------
@@ -47,12 +51,13 @@ with st.sidebar:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load(code_list):
-    return idx.fetch(list(code_list), period="5y")
+    now = datetime.now(timing.WIB)
+    return {c: timing.drop_unfinished(d, now) for c, d in idx.fetch(list(code_list), period="5y").items()}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_ihsg():
-    return idx.fetch_ihsg(period="5y")
+    return timing.drop_unfinished(idx.fetch_ihsg(period="5y"), datetime.now(timing.WIB))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -97,7 +102,16 @@ if df.empty:
     st.info(t["no_liquid"], icon=":material/info:")
     st.stop()
 
-st.caption(f":material/event: {t['kpi_date']} {df['date'].max().strftime('%d-%m-%Y')}")
+def day_name(d):
+    return f"{t['days'][d.weekday()]}, {d.strftime('%d-%m-%Y')}"
+
+
+now = datetime.now(timing.WIB)
+phase, when = timing.market_status(now)
+when_txt = (t["opens"].format(when=f"{day_name(when)} {when:%H:%M}") if phase == "closed"
+            else t["until"].format(when=f"{when:%H:%M}"))
+st.caption(f":material/event: {t['kpi_date']} {df['date'].max().strftime('%d-%m-%Y')}  ·  "
+           f":material/schedule: **{t['phase'][phase]}** · {when_txt} WIB")
 buys = df[df["signal"] & (df["lots"] > 0)]
 
 
@@ -114,8 +128,8 @@ st.markdown(stock_row("IHSG"), unsafe_allow_html=True)
 st.markdown(ui.stats([(t["kpi_buys"], str(len(buys))),
                       (t["kpi_ml"], t["ml_on"] if has_edge else t["ml_off"])]), unsafe_allow_html=True)
 
-tab_rec, tab_ml, tab_all, tab_guide = st.tabs([
-    f":material/thumb_up: {t['tab_rec']}", f":material/psychology: {t['tab_ml']}",
+tab_rec, tab_pos, tab_ml, tab_all, tab_guide = st.tabs([
+    f":material/thumb_up: {t['tab_rec']}", f":material/work: {t['tab_pos']}", f":material/psychology: {t['tab_ml']}",
     f":material/format_list_bulleted: {t['tab_all']}", f":material/school: {t['tab_guide']}",
 ])
 
@@ -143,6 +157,14 @@ with tab_rec:
                        if r["bt_trades"] else t["history_none"])
             if r["bt_trades"] and r["bt_avg%"] < 0:
                 st.warning(t["history_bad"], icon=":material/warning:")
+            sch = timing.schedule(r["date"], mode)
+            st.markdown(f"**{t['plan_title']}**")
+            st.markdown(ui.ticket([
+                (t["plan_buy"], t["plan_buy_v"].format(day=day_name(sch["buy_day"]), price=num(r["entry"]))),
+                (t["plan_protect"], t["plan_protect_v"].format(stop=num(r["stop"]), target=num(r["target"]))),
+                (t["plan_check"], t["plan_check_v"]),
+                (t["plan_exit"], t["plan_exit_v"].format(day=day_name(sch["exit_deadline"])), "down"),
+            ]), unsafe_allow_html=True)
             st.link_button(t["cta_buy"].format(code=r["code"]), f"https://stockbit.com/symbol/{r['code']}",
                            icon=":material/open_in_new:", type="primary", width="stretch")
 
@@ -162,9 +184,83 @@ with tab_rec:
             html += stock_row(r["code"], (t["near_missing"].format(cond=cond_text[miss].split(":")[0]), "flat"))
         st.markdown(html, unsafe_allow_html=True)
 
+# ---------- my positions ----------
+def read_positions():
+    try:
+        return json.loads(POSITIONS.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def write_positions(rows):
+    POSITIONS.parent.mkdir(parents=True, exist_ok=True)
+    POSITIONS.write_text(json.dumps(rows, indent=1))
+
+
+with tab_pos:
+    positions = read_positions()
+    with st.expander(t["add_pos"], icon=":material/add:", expanded=not positions):
+        with st.form("add_position", clear_on_submit=True, border=False):
+            f1, f2 = st.columns(2)
+            p_code = f1.selectbox(t["pos_code"], sorted(data))
+            p_mode = f2.radio(t["pos_mode"], ["swing", "daily"], format_func=lambda m: t[m], horizontal=True,
+                              index=0 if mode == "swing" else 1)
+            f3, f4, f5 = st.columns(3)
+            p_date = f3.date_input(t["pos_date"], value=now.date(), max_value=now.date(), format="DD/MM/YYYY")
+            p_price = f4.number_input(t["pos_price"], min_value=0, step=5)
+            p_lots = f5.number_input(t["pos_lots"], min_value=0, step=1)
+            if st.form_submit_button(t["pos_save"], icon=":material/save:", type="primary"):
+                if p_price > 0 and p_lots >= 1 and p_date <= now.date():
+                    positions.append({"code": p_code, "mode": p_mode, "date": p_date.isoformat(),
+                                      "price": float(p_price), "lots": int(p_lots)})
+                    write_positions(positions)
+                    st.success(t["pos_saved"], icon=":material/check:")
+                else:
+                    st.error(t["pos_bad"], icon=":material/error:")
+    if not positions:
+        st.info(t["pos_none"], icon=":material/info:")
+    for i, p in enumerate(positions):
+        buy_day = datetime.fromisoformat(p["date"]).date()
+        if p["code"] not in data:
+            st.warning(t["no_data"] + p["code"], icon=":material/warning:")
+            continue
+        try:
+            ex = timing.exit_check(idx.indicators(data[p["code"]]), buy_day, p["price"], p["mode"])
+        except ValueError:
+            st.warning(t["pos_err"].format(code=p["code"], day=day_name(buy_day)), icon=":material/warning:")
+            continue
+        hold = idx.MODES[p["mode"]]["hold"]
+        action = ex["action"]
+        if action == "hold" and now.date() == ex["deadline"] and phase != "closed":
+            action = "hold_last"
+        label, css, advice = t["act"][action]
+        with st.container(border=True):
+            st.markdown(stock_row(p["code"], (label, css)), unsafe_allow_html=True)
+            rows = [(t["pos_price"], f"{num(p['price'])} · {p['lots']} lot · {t[p['mode']].strip('*')}"),
+                    (t["stop"], num(ex["stop"]), "down"), (t["target"], num(ex["target"]), "up")]
+            if ex["last"] is not None:
+                rows.append((t["pnl"], f"{'+' if ex['pnl'] > 0 else ''}{pct(ex['pnl'], 2)} "
+                                       f"(Rp {num(p['lots'] * idx.LOT * p['price'] * ex['pnl'] / 100)})",
+                             "up" if ex["pnl"] > 0 else "down" if ex["pnl"] < 0 else ""))
+            rows += [(t["held"], t["day_n"].format(n=ex["days"], m=hold)),
+                     (t["deadline"], day_name(ex["deadline"]))]
+            st.markdown(ui.ticket(rows), unsafe_allow_html=True)
+            box = st.success if css == "up" else st.error if css == "down" else st.info
+            box(f"**{label}** · " + advice.format(stop=num(ex["stop"]), target=num(ex["target"]), m=hold),
+                icon=":material/campaign:")
+            b1, b2 = st.columns(2)
+            b1.link_button(t["open_stockbit"].format(code=p["code"]), f"https://stockbit.com/symbol/{p['code']}",
+                           icon=":material/open_in_new:", width="stretch")
+            with b2.popover(t["pos_delete"], icon=":material/delete:", width="stretch"):
+                st.write(t["pos_confirm"].format(code=p["code"]))
+                if st.button(t["pos_delete"], key=f"del{i}", type="primary"):
+                    write_positions(positions[:i] + positions[i + 1:])
+                    st.rerun()
+
 # ---------- ML ----------
 with tab_ml:
     st.markdown(t["ml_intro"])
+    st.caption(t["ml_why"])
     c1, c2 = st.columns([1, 2])
     c1.metric(t["auc"], num(auc, 3), help=t["auc_help"], border=True)
     if has_edge:
@@ -230,6 +326,9 @@ with tab_guide:
         for term, meaning in GLOSSARY[lang]:
             st.markdown(f"**{term}**: {meaning}")
     with g2:
+        with st.container(border=True):
+            st.subheader(t["hours_title"], anchor=False)
+            st.markdown("  \n".join(f":material/schedule: {h}" for h in t["hours"]))
         with st.container(border=True):
             st.subheader(t["guide_risk_title"], anchor=False)
             st.markdown("  \n".join(f":material/error_outline: {s}" for s in t["guide_risk"]))
