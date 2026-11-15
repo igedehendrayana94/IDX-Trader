@@ -79,6 +79,10 @@ T = {
                   "Exchange holidays are not included in this app's dates: check the IDX calendar."],
         "ml_why": "Method: gradient boosting, usually the most accurate choice for table data such as stock "
                   "indicators. It is tested walk-forward so it never peeks at the future.",
+        "tv_rec": {"STRONG_BUY": "Strong buy", "BUY": "Buy", "NEUTRAL": "Neutral", "SELL": "Sell",
+                   "STRONG_SELL": "Strong sell"},
+        "tv_line": "TradingView now: daily **{d}**, 15 min **{m}** ({b} buy · {n} neutral · {s} sell indicators)",
+        "tv_note": "Second opinion from TradingView indicators. Not backtested, so do not use it on its own.",
         "cta_buy": "BUY {code} IN STOCKBIT", "total": "Total cost", "maxloss": "Max loss",
         "of_capital": "of capital", "conds": "{a}/{b} conditions", "full_table": "Full table (advanced)",
         "ihsg_name": "Jakarta Composite Index", "ml_short": "ML model",
@@ -205,6 +209,10 @@ T = {
                   "Hari libur bursa belum diperhitungkan dalam tanggal aplikasi ini: cek kalender BEI."],
         "ml_why": "Metode: *gradient boosting*, umumnya pilihan paling akurat untuk data tabel seperti indikator "
                   "saham. Model diuji dengan metode *walk-forward* sehingga tidak pernah melihat data masa depan.",
+        "tv_rec": {"STRONG_BUY": "Beli kuat", "BUY": "Beli", "NEUTRAL": "Netral", "SELL": "Jual",
+                   "STRONG_SELL": "Jual kuat"},
+        "tv_line": "TradingView saat ini: harian **{d}**, 15 menit **{m}** ({b} beli · {n} netral · {s} jual)",
+        "tv_note": "Pendapat kedua dari indikator TradingView. Belum diuji historis, jadi jangan dipakai sendirian.",
         "cta_buy": "BELI {code} DI STOCKBIT", "total": "Total biaya", "maxloss": "Rugi maks.",
         "of_capital": "dari modal", "conds": "{a}/{b} syarat", "full_table": "Tabel lengkap (lanjutan)",
         "ihsg_name": "Indeks Harga Saham Gabungan", "ml_short": "Model ML",

@@ -73,6 +73,11 @@ def load_foreign():
     return idx.load_foreign(FOREIGN_DIR)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_tv(codes, interval):
+    return idx.tv_ratings(list(codes), interval)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def train(code_list, mode, use_ihsg, use_foreign):
     p = ml.dataset(load(code_list), mode, ihsg=load_ihsg() if use_ihsg else None,
@@ -123,6 +128,15 @@ st.caption(f":material/event: {t['kpi_date']} {df['date'].max().strftime('%d-%m-
 buys = df[df["signal"] & (df["lots"] > 0)]
 
 
+def tv_line(code, tv_d, tv_m):
+    """One-line TradingView second opinion, or nothing when TradingView has no data."""
+    d, m = tv_d.get(code), tv_m.get(code)
+    if not d:
+        return
+    st.markdown(t["tv_line"].format(d=t["tv_rec"][d["rec"]], m=t["tv_rec"][m["rec"]] if m else "-",
+                                    b=d["buy"], n=d["neutral"], s=d["sell"]), help=t["tv_note"])
+
+
 def stock_row(code, chip=None):
     """Watchlist row from price history: last close, change vs previous close, 30-day sparkline."""
     c = data[code]["Close"] if code in data else ihsg["Close"]
@@ -144,6 +158,8 @@ tab_rec, tab_pos, tab_ml, tab_all, tab_guide = st.tabs([
 # ---------- recommendations ----------
 with tab_rec:
     st.markdown(t["rec_intro"].format(n=len(cond_keys), mode=t[mode]))
+    tv_codes = tuple(buys["code"])
+    tv_d, tv_m = (load_tv(tv_codes, "1d"), load_tv(tv_codes, "15m")) if tv_codes else ({}, {})
     for _, r in buys.iterrows():
         with st.container(border=True):
             st.markdown(stock_row(r["code"], (t["buy"].upper(), "up")), unsafe_allow_html=True)
@@ -161,6 +177,7 @@ with tab_rec:
             st.markdown("  \n".join(f":material/check_circle: {cond_text[k]}" for k in cond_keys))
             st.markdown(t["ml_line"].format(prob=pct(r["ml_prob"] * 100), base=pct(base_win))
                         if has_edge else t["ml_skip"])
+            tv_line(r["code"], tv_d, tv_m)
             st.caption(t["history"].format(n=r["bt_trades"], win=pct(r["bt_win%"]), avg=pct(r["bt_avg%"], 2))
                        if r["bt_trades"] else t["history_none"])
             if r["bt_trades"] and r["bt_avg%"] < 0:
@@ -227,6 +244,8 @@ with tab_pos:
                     st.error(t["pos_bad"], icon=":material/error:")
     if not positions:
         st.info(t["pos_none"], icon=":material/info:")
+    pos_codes = tuple(sorted({p["code"] for p in positions}))
+    pos_tv_d, pos_tv_m = (load_tv(pos_codes, "1d"), load_tv(pos_codes, "15m")) if pos_codes else ({}, {})
     for i, p in enumerate(positions):
         buy_day = datetime.fromisoformat(p["date"]).date()
         if p["code"] not in data:
@@ -253,6 +272,7 @@ with tab_pos:
             rows += [(t["held"], t["day_n"].format(n=ex["days"], m=hold)),
                      (t["deadline"], day_name(ex["deadline"]))]
             st.markdown(ui.ticket(rows), unsafe_allow_html=True)
+            tv_line(p["code"], pos_tv_d, pos_tv_m)
             box = st.success if css == "up" else st.error if css == "down" else st.info
             box(f"**{label}** · " + advice.format(stop=num(ex["stop"]), target=num(ex["target"]), m=hold),
                 icon=":material/campaign:")

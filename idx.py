@@ -108,6 +108,20 @@ def load_foreign(folder="data/foreign"):
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["date", "code", "fnet"])
 
 
+def tv_ratings(codes, interval="1d"):
+    """Live TradingView technical rating per IDX code (unofficial endpoint via tradingview_ta).
+    Current snapshot only, no history, so it cannot be backtested: display as a second opinion.
+    Returns {} when TradingView is unreachable."""
+    from tradingview_ta import get_multiple_analysis
+    try:
+        res = get_multiple_analysis(screener="indonesia", interval=interval, symbols=[f"IDX:{c}" for c in codes])
+    except Exception:  # network or endpoint change: the app works without it
+        return {}
+    return {k.split(":")[1]: {"rec": a.summary["RECOMMENDATION"], "buy": a.summary["BUY"],
+                              "neutral": a.summary["NEUTRAL"], "sell": a.summary["SELL"]}
+            for k, a in res.items() if a}
+
+
 def indicators(df):
     d = df.copy()
     c, h, l = d["Close"], d["High"], d["Low"]
