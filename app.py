@@ -138,6 +138,8 @@ cond_keys = list(idx.conditions(idx.indicators(next(iter(data.values()))), mode)
 st.title("IDX Trader")
 st.caption(t["subtitle"])
 missing = set(code_list) - set(data)
+if not data:
+    load.clear()  # Yahoo failed outright; don't serve the empty result for the full TTL
 if missing:
     st.warning(t["no_data"] + " ".join(sorted(missing)), icon=":material/warning:")
 if df.empty:
