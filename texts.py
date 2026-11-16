@@ -25,7 +25,7 @@ T = {
         "no_data": "No data for: ", "no_liquid": "No stock passes the liquidity filter. Lower it in Advanced settings.",
         # header
         "kpi_buys": "Buy ideas today", "kpi_ihsg": "IHSG (market index)", "kpi_ml": "Use ML model?",
-        "kpi_date": "Data as of", "ml_on": "Yes", "ml_off": "No",
+        "kpi_date": "Signals from close of", "live_at": "Prices {time} WIB (~15 min delayed)", "ml_on": "Yes", "ml_off": "No",
         # tabs
         "tab_rec": "Recommendations", "tab_ml": "ML prediction", "tab_all": "All stocks", "tab_guide": "Guide",
         # recommendations
@@ -227,7 +227,7 @@ T = {
         "no_data": "Data tidak tersedia: ",
         "no_liquid": "Tidak ada saham yang lolos filter likuiditas. Turunkan batasnya di Pengaturan lanjutan.",
         "kpi_buys": "Ide beli hari ini", "kpi_ihsg": "IHSG (indeks pasar)", "kpi_ml": "Pakai model ML?",
-        "kpi_date": "Data per tanggal", "ml_on": "Ya", "ml_off": "Tidak",
+        "kpi_date": "Sinyal dari penutupan", "live_at": "Harga pukul {time} WIB (tertunda ±15 menit)", "ml_on": "Ya", "ml_off": "Tidak",
         "tab_rec": "Rekomendasi", "tab_ml": "Prediksi ML", "tab_all": "Semua saham", "tab_guide": "Panduan",
         "rec_intro": "Saham yang memenuhi **semua** ({n}) syarat gaya {mode} hari ini. Beli saat pasar buka "
                      "berikutnya, lalu segera pasang *stop loss* dan target di Stockbit.",

@@ -2,6 +2,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 import idx
@@ -72,19 +73,32 @@ limits = {**risk.DEFAULT_LIMITS, "risk_pct": risk_pct, "daily_loss_pct": daily_l
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load(code_list):
+def load(code_list, day):  # day = cache key so the new closed bar shows right at 16:15, not up to 1h later
     now = datetime.now(timing.WIB)
     return {c: timing.drop_unfinished(d, now) for c, d in idx.fetch(list(code_list), period="5y").items()}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_ihsg():
+def load_ihsg(day):
     return timing.drop_unfinished(idx.fetch_ihsg(period="5y"), datetime.now(timing.WIB))
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_foreign():
     return idx.load_foreign(FOREIGN_DIR)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_live(code_list):
+    """Today's unfinished daily bar per code and IHSG (yfinance, ~15 min late): prices on screen only,
+    signals keep using closed days."""
+    bars = idx.fetch(list(code_list), period="6mo")  # fetch needs >= 60 bars
+    try:
+        bars["IHSG"] = idx.fetch_ihsg(period="5d")
+    except Exception:  # Yahoo hiccup: header falls back to the last close
+        pass
+    now = datetime.now(timing.WIB)
+    return {c: d.iloc[-1:] for c, d in bars.items() if len(d) and d.index[-1].date() == now.date()}, now
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -104,20 +118,23 @@ def load_timemachine(codes, today):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def train(code_list, mode, use_ihsg, use_foreign):
-    p = ml.dataset(load(code_list), mode, ihsg=load_ihsg() if use_ihsg else None,
+def train(code_list, day, mode, use_ihsg, use_foreign):
+    p = ml.dataset(load(code_list, day), mode, ihsg=load_ihsg(day) if use_ihsg else None,
                    foreign=load_foreign() if use_foreign else None)
     return ml.walk_forward(p, mode), ml.predict_latest(p)
 
 
 if refresh:
-    for f in (load, load_ihsg, load_foreign, load_tv, load_intraday, load_timemachine, train):
+    for f in (load, load_ihsg, load_live, load_foreign, load_tv, load_intraday, load_timemachine, train):
         f.clear()
 
 # ---------- data ----------
 code_list = tuple(sorted({c.strip().upper() for c in codes.split() if c.strip()}))
+now = datetime.now(timing.WIB)
+day = (now.date(), now.time() >= timing.DATA_READY)
 with st.spinner(t["downloading"]):
-    data, ihsg = load(code_list), load_ihsg()
+    data, ihsg = load(code_list, day), load_ihsg(day)
+    live, live_at = load_live(code_list)
 reg = risk.regime_series(data, ihsg).iloc[-1] if data else None
 light = reg["light"] if reg is not None else "yellow"
 factor = 0.5 if light == "yellow" else 1.0  # red keeps full plan for learning; the risk gate blocks the buy
@@ -127,7 +144,7 @@ foreign_days = load_foreign()["date"].nunique()
 use_foreign = foreign_days >= FOREIGN_MIN_DAYS
 if not df.empty:
     with st.spinner(t["training"]):
-        wf, prob = train(code_list, mode, use_ihsg, use_foreign)
+        wf, prob = train(code_list, day, mode, use_ihsg, use_foreign)
     df.insert(4, "ml_prob", df["code"].map(prob).round(3))
     auc = wf["auc"].mean() if len(wf) else 0.5
     base_win = wf["base_win%"].mean() if len(wf) else float("nan")
@@ -146,12 +163,24 @@ if df.empty:
     st.info(t["no_liquid"], icon=":material/info:")
     st.stop()
 
-now = datetime.now(timing.WIB)
 phase, when = timing.market_status(now)
+MARKET_OPEN = ("pre_open", "session1", "break", "session2", "pre_close")
 when_txt = (t["opens"].format(when=f"{day_name(when)} {when:%H:%M}") if phase == "closed"
             else t["until"].format(when=f"{when:%H:%M}"))
 st.caption(f":material/event: {t['kpi_date']} {df['date'].max().strftime('%d-%m-%Y')}  ·  "
-           f":material/schedule: **{t['phase'][phase]}** · {when_txt} WIB")
+           f":material/schedule: **{t['phase'][phase]}** · {when_txt} WIB"
+           + (f"  ·  :material/update: {t['live_at'].format(time=f'{live_at:%H:%M}')}" if live else ""))
+st.session_state["ran_at"] = now
+
+
+@st.fragment(run_every=300 if phase in MARKET_OPEN else None)
+def auto_refresh():
+    """Rerun the whole page every 5 min while the market is open so prices stay current."""
+    if (datetime.now(timing.WIB) - st.session_state["ran_at"]).total_seconds() >= 290:
+        st.rerun(scope="app")
+
+
+auto_refresh()
 buys = df[df["signal"] & (df["lots"] > 0)]
 
 
@@ -164,9 +193,15 @@ def tv_line(code, tv_d, tv_m):
                                     b=d["buy"], n=d["neutral"], s=d["sell"]), help=t["tv_note"])
 
 
+def with_live(code, df):
+    """Closed daily bars plus today's unfinished bar when there is one."""
+    bar = live.get(code)
+    return df if bar is None or bar.index[-1] <= df.index[-1] else pd.concat([df, bar])
+
+
 def stock_row(code, chip=None):
-    """Watchlist row from price history: last close, change vs previous close, 30-day sparkline."""
-    c = data[code]["Close"] if code in data else ihsg["Close"]
+    """Watchlist row from price history: latest price, change vs previous close, 30-day sparkline."""
+    c = with_live(code, data[code] if code in data else ihsg)["Close"]
     name = t["ihsg_name"] if code == "IHSG" else idx.NAMES.get(code, "")
     return ui.row(code, name, c.tail(30), c.iloc[-1], c.iloc[-1] - c.iloc[-2],
                   (c.iloc[-1] / c.iloc[-2] - 1) * 100, num, chip)
@@ -286,7 +321,7 @@ ORB_ORDER = ["open", "waiting", "forming", "target", "stop", "time", "expired", 
 ORB_CSS = {"open": "up", "target": "up", "stop": "down", "time": "flat"}
 
 
-@st.fragment(run_every=300 if phase in ("pre_open", "session1", "break", "session2", "pre_close") else None)
+@st.fragment(run_every=300 if phase in MARKET_OPEN else None)
 def orb_view():
     st.markdown(t["orb_intro"])
     st.caption(f":material/schedule: {t['orb_delay']}")
@@ -397,7 +432,7 @@ with tab_pos:
             st.warning(t["no_data"] + p["code"], icon=":material/warning:")
             continue
         try:
-            ex = timing.exit_check(idx.indicators(data[p["code"]]), buy_day, p["price"], p["mode"],
+            ex = timing.exit_check(idx.indicators(with_live(p["code"], data[p["code"]])), buy_day, p["price"], p["mode"],
                                    p.get("stop"), p.get("target"))
         except ValueError:
             st.warning(t["pos_err"].format(code=p["code"], day=day_name(buy_day)), icon=":material/warning:")
