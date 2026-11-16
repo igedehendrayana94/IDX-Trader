@@ -66,12 +66,15 @@ def schedule(signal_day, mode):
 def exit_check(d, buy_day, entry, mode, stop=None, target=None):
     """Hold or sell for a position bought on buy_day at entry. d = idx.indicators() frame.
     stop/target: the ones saved with the position; otherwise the buy plan's (ATR of the day before buying)."""
-    before, since = d[d.index.date < buy_day], d[d.index.date >= buy_day]
+    after_close = mode == "bsjp"  # bought in the pre-close auction: the buy day's own range came before the entry
+    before = d[d.index.date < buy_day]
+    since = d[d.index.date > buy_day] if after_close else d[d.index.date >= buy_day]
     if before.empty:
         raise ValueError("no price history before the buy date")
     if stop is None or target is None:
-        stop, target, _ = idx.plan(entry, float(before["atr"].iloc[-1]), mode, 0, 0)
-    deadline = schedule(before.index[-1].date(), mode)["exit_deadline"]
+        plan_mode = mode if mode in idx.MODES else "daily"  # orb/bsjp added by hand: use the 1-day plan
+        stop, target, _ = idx.plan(entry, float(before["atr"].iloc[-1]), plan_mode, 0, 0)
+    deadline = next_trading_day(buy_day) if after_close else schedule(before.index[-1].date(), mode)["exit_deadline"]
     out = {"stop": stop, "target": target, "deadline": deadline, "days": len(since), "last": None, "pnl": 0.0}
     if since.empty:
         out["action"] = "wait_data"
@@ -121,4 +124,9 @@ if __name__ == "__main__":
     assert exit_check(d, date(2026, 11, 13), 1000, "orb", stop=985, target=1015)["action"] == "sell_time"
     assert exit_check(d, date(2026, 11, 13), 1000, "orb", stop=995, target=1005)["action"] == "sell_stop"
     assert schedule(date(2026, 11, 13), "orb")["exit_deadline"] == date(2026, 11, 16)
+    # BSJP bought at Friday's close: Friday's own low must not trigger the stop; sell on Monday
+    fri = exit_check(d, date(2026, 11, 13), 1000, "bsjp", stop=995, target=1015)
+    assert fri["action"] == "wait_data" and fri["deadline"] == date(2026, 11, 16), fri
+    assert exit_check(d, date(2026, 11, 12), 1000, "bsjp", stop=995, target=1015)["action"] == "sell_stop"
+    assert exit_check(d, date(2026, 11, 12), 1000, "bsjp")["deadline"] == date(2026, 11, 13)  # no saved stop
     print("ok")

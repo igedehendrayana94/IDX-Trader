@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 
 import pandas as pd
@@ -118,6 +118,11 @@ def load_timemachine(codes, today):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def bsjp_history(code_list, day):
+    return {c: idx.bsjp_backtest(idx.indicators(d)) for c, d in load(code_list, day).items()}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def train(code_list, day, mode, use_ihsg, use_foreign):
     p = ml.dataset(load(code_list, day), mode, ihsg=load_ihsg(day) if use_ihsg else None,
                    foreign=load_foreign() if use_foreign else None)
@@ -125,7 +130,7 @@ def train(code_list, day, mode, use_ihsg, use_foreign):
 
 
 if refresh:
-    for f in (load, load_ihsg, load_live, load_foreign, load_tv, load_intraday, load_timemachine, train):
+    for f in (load, load_ihsg, load_live, bsjp_history, load_foreign, load_tv, load_intraday, load_timemachine, train):
         f.clear()
 
 # ---------- data ----------
@@ -396,11 +401,69 @@ def orb_card(code, res):
             add_position(code, "orb", entry, lots, stop, target, f"orb_{code}")
 
 
+BSJP_FROM = time(15, 0)  # earlier the daily bar is too unfinished to call a signal
+
+
+def bsjp_view():
+    st.markdown(t["bsjp_intro"])
+    st.caption(f":material/schedule: {t['bsjp_delay']}")
+    hist = bsjp_history(code_list, day)
+    allh = pd.concat(hist.values()) if hist else pd.DataFrame(columns=["bsjp", "morning"])
+    if len(allh):
+        avg = allh["bsjp"].mean() * 100
+        (st.success if avg > 0 else st.warning)(
+            t["bsjp_hist"].format(n=len(allh), avg=pct(avg, 2), win=pct((allh["bsjp"] > 0).mean() * 100),
+                                  morning=pct(allh["morning"].mean() * 100, 2)), icon=":material/history:")
+    window = phase in ("session2", "pre_close") and now.time() >= BSJP_FROM
+    if not window:
+        st.info(t["bsjp_wait"], icon=":material/schedule:")
+    st.subheader(t["bsjp_list"], anchor=False)
+    picks = []
+    for c in df["code"]:
+        if c in live:  # only stocks with a bar for today; signal on today's unfinished (delayed) bar
+            d = idx.indicators(with_live(c, data[c]))
+            if idx.conditions(d, "daily").iloc[-1].all():
+                picks.append((c, d))
+    if not picks:
+        st.info(t["bsjp_none"], icon=":material/hourglass_empty:")
+    for c, d in picks:
+        bsjp_card(c, d, hist.get(c), window)
+
+
+def bsjp_card(code, d, hist, window):
+    entry = float(d["Close"].iloc[-1])
+    stop, target, lots = idx.plan(entry, float(d["atr"].iloc[-1]), "daily", capital, max_alloc, risk_pct, factor)
+    rows = [(t["bsjp_now"], num(entry)), (t["bsjp_buy"], t["bsjp_buy_v"]),
+            (t["bsjp_sell"], t["bsjp_sell_v"].format(day=day_name(timing.next_trading_day(now.date())))),
+            (t["stop"], f"{num(stop)} ({pct((stop / entry - 1) * 100, 2)})", "down"),
+            (t["lots"], f"{num(lots)} lot"), (t["total"], f"Rp {num(lots * idx.LOT * entry * (1 + idx.BUY_FEE))}")]
+    if hist is not None and len(hist):
+        rows.append((t["bsjp_stock_hist"], t["bsjp_stock_hist_v"].format(n=len(hist),
+                                                                           avg=pct(hist["bsjp"].mean() * 100, 2))))
+    with st.container(border=True):
+        st.markdown(stock_row(code, (t["bsjp_chip"], "up")), unsafe_allow_html=True)
+        st.markdown(ui.ticket(rows), unsafe_allow_html=True)
+        st.caption(t["bsjp_gap"])
+        checks = [("window_bsjp" if k == "window" else k, ok, x) for k, ok, x in
+                  risk.gate(entry, stop, target, lots, capital, light, positions, trades, now.date(), limits,
+                            window_open=window)]
+        ok = show_gate(checks)
+        st.link_button(t["cta_buy"].format(code=code), f"https://stockbit.com/symbol/{code}",
+                       icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
+        if ok:
+            add_position(code, "bsjp", entry, lots, stop, target, f"bsjp_{code}")
+
+
 with tab_orb:
-    orb_view()
+    how = st.segmented_control(t["dt_when"], ["orb", "bsjp"], default="orb", required=True,
+                               format_func=lambda k: t["dt_opt"][k], key="dt_when")
+    if how == "orb":
+        orb_view()
+    else:
+        bsjp_view()
 
 # ---------- my positions ----------
-MODES_ALL = ["swing", "daily", "orb"]
+MODES_ALL = ["swing", "daily", "orb", "bsjp"]
 EXIT_REASON = {"sell_stop": "stop", "sell_target": "target", "sell_time": "time"}
 
 with tab_pos:

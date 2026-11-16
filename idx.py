@@ -224,6 +224,15 @@ def backtest(d, mode):
     return {"trades": len(s), "win_rate": (s > 0).mean(), "avg_ret": s.mean()}
 
 
+def bsjp_backtest(d):
+    """Net return per daily-signal day, two ways to trade it: 'bsjp' = buy at that close, sell next open
+    (beli sore jual pagi); 'morning' = buy next open, sell next close. d = indicators() frame."""
+    sig = conditions(d, "daily").all(axis=1)
+    o1, c1 = d["Open"].shift(-1), d["Close"].shift(-1)
+    net = lambda buy, sell: sell * (1 - SELL_FEE) / (buy * (1 + BUY_FEE)) - 1  # noqa: E731
+    return pd.DataFrame({"bsjp": net(d["Close"], o1), "morning": net(o1, c1)})[sig].dropna()
+
+
 def screen(data, mode, capital, max_alloc, min_value, risk_pct=1.0, factor=1.0):
     rows = []
     for code, df in data.items():
@@ -261,6 +270,12 @@ if __name__ == "__main__":
             assert stop < entry and (entry - stop) / entry <= MAX_LOSS + 1e-9, (mode, entry, stop)
             assert stop % tick(stop) == 0 and target > entry
             assert lots * LOT * entry * (1 + BUY_FEE) <= 2_500_000
+    # BSJP history: signal day 2 (breakout on 2x volume, closed at the high) -> buy 1100 close, sell 1120 open
+    b = pd.DataFrame({"Open": [1000] * 21 + [1000, 1120], "High": [1010] * 21 + [1100, 1130],
+                      "Low": [990] * 21 + [995, 1110], "Close": [1000] * 21 + [1100, 1125],
+                      "Volume": [1e6] * 21 + [3e6, 1e6]}, index=pd.bdate_range("2026-01-01", periods=23))
+    h = bsjp_backtest(indicators(b))
+    assert len(h) == 1 and abs(h["bsjp"].iloc[0] - (1120 * (1 - SELL_FEE) / (1100 * (1 + BUY_FEE)) - 1)) < 1e-12
     # foreign flow file parsing
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
