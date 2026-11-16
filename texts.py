@@ -113,7 +113,7 @@ T = {
             "daily_loss": ("Loss today Rp {loss} (limit Rp {max})", "Daily loss limit reached: Rp {loss} (limit Rp {max})"),
             "streak": ("No {n} losses in a row", "{n} losses in a row: take a break until {until}"),
             "window": ("Within the entry window", "Entry window closed (after 14:30)"),
-            "window_bsjp": ("Within the BSJP buy window (15:00–16:00)", "Outside the BSJP buy window (15:00–16:00 on trading days)"),
+            "window_bsjp": ("Within the BSJP buy window (15:00–16:15)", "Outside the BSJP buy window (15:00–16:15 on trading days)"),
             "news": ("No danger headline (suspension, PKPU, bankruptcy, default, UMA) in the last 7 days",
                      "Danger headline in the last 7 days ({n}): suspension, PKPU, bankruptcy, default or UMA"),
         },
@@ -159,22 +159,31 @@ T = {
                      "used to pick stocks because news history is too short to test. Headlines are saved in data/news.",
         "dt_when": "When to buy",
         "dt_opt": {"orb": "Morning–midday (ORB)", "bsjp": "Afternoon close, sell next morning (BSJP)"},
-        "bsjp_intro": "Buy at the close, sell next morning (BSJP): 1) from 15:00, the list shows stocks meeting all 4 "
-                      "conditions of the Daily style on today's price, 2) buy in the pre-closing auction 15:50–16:00 "
-                      "(you get the closing price), 3) sell the next trading day in pre-opening 08:45–09:00 at the "
+        "bsjp_intro": "Buy at the close, sell next morning (BSJP): 1) from 15:00, the list shows the ML model's top 3 "
+                      "(or, without a proven model, stocks meeting all 4 Daily conditions) on today's price, 2) buy in the pre-closing auction 15:50–16:00 "
+                      "or post-trading 16:01–16:15 (you get the closing price), 3) sell the next trading day in pre-opening 08:45–09:00 at the "
                       "opening price.",
         "bsjp_delay": "Prices are delayed about 15 minutes and volume is still building, so the list at 15:30 is short "
                       "but rarely wrong. Check the price in Stockbit before buying.",
         "bsjp_hist": "5-year history of this rule: {n} signals, BSJP avg {avg} per trade after fees, win {win}. "
                      "The same signals bought next morning and sold at the close: avg {morning}. "
                      "Around zero means break-even, not profit: fees take about 0.4% per trade.",
-        "bsjp_wait": "BSJP buys are allowed only from 15:00 until 16:00 WIB on trading days. Before that the list can "
+        "bsjp_wait": "BSJP buys are allowed only from 15:00 until 16:15 WIB on trading days. Before that the list can "
                      "still change.",
         "bsjp_list": "Today's BSJP candidates",
         "bsjp_none": "No stock meets all 4 conditions on today's price yet. Check again around 15:30–15:45.",
         "bsjp_chip": "BSJP",
         "bsjp_now": "Price now (delayed)",
-        "bsjp_buy": "Buy", "bsjp_buy_v": "Today 15:50–16:00 (pre-closing), at the closing price",
+        "bsjp_buy": "Buy", "bsjp_buy_v": "Today: limit {max} in pre-closing 15:50–16:00, or in post-trading 16:01–16:15",
+        "bsjp_max": "Max buy price",
+        "bsjp_how": "In pre-closing all orders are matched at 16:00 at one price, the closing price. A limit of {max} fills "
+                    "at that closing price as long as it is {max} or lower; you do not pay your limit. In post-trading "
+                    "(16:01–16:15) trades happen only at the known closing price. If the stock closes above {max}, skip "
+                    "it: the overnight edge is only about one price tick.",
+        "bsjp_range": "Tomorrow's open (history)",
+        "bsjp_range_v": "{med} vs close (half between {p25} and {p75})",
+        "bsjp_range_note": "From {n} past ML #{rank} picks in the walk-forward test: next open vs close, before fees; "
+                           "{win} ended in profit after fees. This is history, not a price promise.",
         "bsjp_sell": "Sell", "bsjp_sell_v": "{day} 08:45–09:00 (pre-opening), at the opening price",
         "bsjp_stock_hist": "5y on this stock", "bsjp_stock_hist_v": "{n}× · avg {avg}",
         "bsjp_gap": "There is no stop loss overnight: if bad news comes out, the stock can open far lower. The stop "
@@ -355,7 +364,7 @@ T = {
             "daily_loss": ("Rugi hari ini Rp {loss} (batas Rp {max})", "Batas rugi harian tercapai: Rp {loss} (batas Rp {max})"),
             "streak": ("Tidak ada {n} rugi beruntun", "{n} kali rugi beruntun: istirahat sampai {until}"),
             "window": ("Masih dalam jam masuk", "Jam masuk sudah lewat (setelah 14:30)"),
-            "window_bsjp": ("Dalam jam beli BSJP (15:00–16:00)", "Di luar jam beli BSJP (15:00–16:00 pada hari bursa)"),
+            "window_bsjp": ("Dalam jam beli BSJP (15:00–16:15)", "Di luar jam beli BSJP (15:00–16:15 pada hari bursa)"),
             "news": ("Tidak ada berita bahaya (suspensi, PKPU, pailit, gagal bayar, UMA) dalam 7 hari terakhir",
                      "Ada berita bahaya dalam 7 hari terakhir ({n}): suspensi, PKPU, pailit, gagal bayar, atau UMA"),
         },
@@ -400,21 +409,30 @@ T = {
                      "disimpan di data/news.",
         "dt_when": "Waktu beli",
         "dt_opt": {"orb": "Pagi–siang (ORB)", "bsjp": "Sore, jual besok pagi (BSJP)"},
-        "bsjp_intro": "Beli sore jual pagi (BSJP): 1) mulai 15:00 daftar menampilkan saham yang memenuhi 4 syarat gaya "
-                      "Harian pada harga hari ini, 2) beli di pra-penutupan 15:50–16:00 (mendapat harga penutupan), "
+        "bsjp_intro": "Beli sore jual pagi (BSJP): 1) mulai 15:00 daftar menampilkan 3 teratas model ML (atau, jika "
+                      "model belum terbukti, saham yang memenuhi 4 syarat Harian) pada harga hari ini, 2) beli di pra-penutupan 15:50–16:00 atau pasca-penutupan 16:01–16:15 (mendapat harga penutupan), "
                       "3) jual pada hari bursa berikutnya di pra-pembukaan 08:45–09:00 pada harga pembukaan.",
         "bsjp_delay": "Harga tertunda sekitar 15 menit dan volume masih bertambah, jadi daftar pada 15:30 masih sedikit "
                       "tetapi jarang keliru. Cek harga di Stockbit sebelum membeli.",
         "bsjp_hist": "Riwayat 5 tahun aturan ini: {n} sinyal, BSJP rata-rata {avg} per transaksi setelah biaya, menang "
                      "{win}. Sinyal yang sama jika dibeli besok pagi dan dijual sore: rata-rata {morning}. "
                      "Mendekati nol berarti impas, bukan untung: biaya sekitar 0,4% per transaksi.",
-        "bsjp_wait": "Beli BSJP hanya diizinkan pukul 15:00–16:00 WIB pada hari bursa. Sebelum itu daftar masih bisa "
+        "bsjp_wait": "Beli BSJP hanya diizinkan pukul 15:00–16:15 WIB pada hari bursa. Sebelum itu daftar masih bisa "
                      "berubah.",
         "bsjp_list": "Kandidat BSJP hari ini",
         "bsjp_none": "Belum ada saham yang memenuhi 4 syarat pada harga hari ini. Cek lagi sekitar 15:30–15:45.",
         "bsjp_chip": "BSJP",
         "bsjp_now": "Harga sekarang (tertunda)",
-        "bsjp_buy": "Beli", "bsjp_buy_v": "Hari ini 15:50–16:00 (pra-penutupan), pada harga penutupan",
+        "bsjp_buy": "Beli", "bsjp_buy_v": "Hari ini: limit {max} di pra-penutupan 15:50–16:00, atau di pasca-penutupan 16:01–16:15",
+        "bsjp_max": "Harga beli maks.",
+        "bsjp_how": "Pada pra-penutupan semua order dicocokkan pukul 16:00 pada satu harga, yaitu harga penutupan. Limit "
+                    "{max} terisi pada harga penutupan itu selama penutupan {max} atau lebih rendah; Anda tidak membayar "
+                    "sebesar limit. Pada pasca-penutupan (16:01–16:15) transaksi hanya pada harga penutupan yang sudah "
+                    "diketahui. Jika saham ditutup di atas {max}, lewati: keunggulan semalam hanya sekitar satu fraksi harga.",
+        "bsjp_range": "Pembukaan besok (riwayat)",
+        "bsjp_range_v": "{med} dari penutupan (separuh antara {p25} dan {p75})",
+        "bsjp_range_note": "Dari {n} pilihan ML #{rank} pada uji *walk-forward*: pembukaan esok hari dibanding "
+                           "penutupan, sebelum biaya; {win} berakhir untung setelah biaya. Ini riwayat, bukan janji harga.",
         "bsjp_sell": "Jual", "bsjp_sell_v": "{day} 08:45–09:00 (pra-pembukaan), pada harga pembukaan",
         "bsjp_stock_hist": "5 tahun di saham ini", "bsjp_stock_hist_v": "{n}× · rata-rata {avg}",
         "bsjp_gap": "Tidak ada stop loss saat malam: jika ada berita buruk, saham bisa dibuka jauh lebih rendah. "

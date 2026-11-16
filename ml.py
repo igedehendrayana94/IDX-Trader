@@ -82,28 +82,41 @@ def model():
                                           min_samples_leaf=200, l2_regularization=1.0, random_state=0)
 
 
-def walk_forward(p, mode, folds=4, test_days=120):
-    """Train only on dates before each test block, with a gap of `hold`+1 days so labels never overlap the test."""
+def oos(p, mode, folds=4, test_days=120):
+    """Out-of-sample probabilities: each test block is scored by a model trained only on dates before it, with a gap
+    of `hold`+1 days so labels never overlap the test. Returns the labeled test rows plus 'prob' and 'fold'."""
     gap = hold(mode) + 1
     lab, X = p[p["y"].notna()], cols(p)
     dates = np.sort(lab["date"].unique())
-    rows = []
+    out = []
     for k in range(folds, 0, -1):
         start = len(dates) - k * test_days
         if start - gap < 250:  # need about a year of training data
             continue
-        test_dates = dates[start:start + test_days]
         train = lab[lab["date"] < dates[start - gap]]
-        test = lab[lab["date"].isin(test_dates)]
-        prob = model().fit(train[X], train["y"]).predict_proba(test[X])[:, 1]
-        top = test[prob >= np.quantile(prob, 0.9)]
-        rank = pd.Series(prob, index=test.index).groupby(test["date"]).rank(ascending=False)
+        test = lab[lab["date"].isin(dates[start:start + test_days])]
+        out.append(test.assign(prob=model().fit(train[X], train["y"]).predict_proba(test[X])[:, 1], fold=k))
+    if not out:
+        return lab.iloc[:0].assign(prob=np.nan, fold=0, rank=np.nan)
+    o = pd.concat(out)
+    return o.assign(rank=o.groupby("date")["prob"].rank(ascending=False, method="first"))
+
+
+def walk_forward(p, mode, folds=4, test_days=120):
+    return summary(oos(p, mode, folds, test_days))
+
+
+def summary(o):
+    """Per test block of oos(): AUC and how the model's top picks did vs all stocks (net of fees)."""
+    rows = []
+    for _, t in o.groupby("fold", sort=False):
+        top = t[t["prob"] >= t["prob"].quantile(0.9)]
         rows.append({
-            "test_from": pd.Timestamp(test_dates[0]).date(), "test_to": pd.Timestamp(test_dates[-1]).date(),
-            "auc": roc_auc_score(test["y"], prob), "base_win%": test["y"].mean() * 100,
-            "top10_win%": top["y"].mean() * 100, "base_avg%": test["ret"].mean() * 100,
-            "top10_avg%": top["ret"].mean() * 100, "top1_avg%": test["ret"][rank <= 1].mean() * 100,
-            "top3_avg%": test["ret"][rank <= 3].mean() * 100, "n_test": len(test),
+            "test_from": t["date"].min().date(), "test_to": t["date"].max().date(),
+            "auc": roc_auc_score(t["y"], t["prob"]), "base_win%": t["y"].mean() * 100,
+            "top10_win%": top["y"].mean() * 100, "base_avg%": t["ret"].mean() * 100,
+            "top10_avg%": top["ret"].mean() * 100, "top1_avg%": t["ret"][t["rank"] <= 1].mean() * 100,
+            "top3_avg%": t["ret"][t["rank"] <= 3].mean() * 100, "n_test": len(t),
         })
     return pd.DataFrame(rows).round(2)
 

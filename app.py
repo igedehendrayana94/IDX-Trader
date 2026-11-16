@@ -130,7 +130,12 @@ def load_news(code, today):
 def train_bsjp(code_list, day, use_ihsg, use_foreign):
     p = ml.dataset(load(code_list, day), "bsjp", ihsg=load_ihsg(day) if use_ihsg else None,
                    foreign=load_foreign() if use_foreign else None)
-    return ml.walk_forward(p, "bsjp"), ml.fit(p)
+    o = ml.oos(p, "bsjp")
+    move = ((o["ret"] + 1) * (1 + idx.BUY_FEE) / (1 - idx.SELL_FEE) - 1) * 100  # next open vs close, before fees
+    rng = {r: {"n": int(m.sum()), "med": move[m].median(), "p25": move[m].quantile(0.25),
+               "p75": move[m].quantile(0.75), "win": (o["ret"][m] > 0).mean() * 100}
+           for r in (1, 2, 3) for m in [o["rank"] == r]}
+    return ml.summary(o), ml.fit(p), rng
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -469,6 +474,7 @@ def orb_card(code, res):
 
 
 BSJP_FROM = time(15, 0)  # earlier the daily bar is too unfinished to call a signal
+BSJP_UNTIL = time(16, 15)  # end of post-trading, where trades happen only at the closing price
 
 
 def bsjp_view():
@@ -489,13 +495,15 @@ def bsjp_view():
                                             last=pct(wf_b["top1_avg%"].iloc[-1], 2)), icon=":material/psychology:")
     else:
         st.caption(f":material/psychology: {t['bsjp_ml_none']}")
-    window = phase in ("session2", "pre_close") and now.time() >= BSJP_FROM
+    window = (phase in ("session2", "pre_close") and now.time() >= BSJP_FROM) or \
+        (timing.is_trading_day(now.date()) and time(16, 0) <= now.time() < BSJP_UNTIL)
     if not window:
         st.info(t["bsjp_wait"], icon=":material/schedule:")
     st.subheader(t["bsjp_list"], anchor=False)
     today = [c for c in df["code"] if c in live]  # liquid stocks with a bar for today (delayed, unfinished)
     frames = {c: idx.indicators(with_live(c, data[c])) for c in today}
     rule = {c for c, d in frames.items() if idx.conditions(d, "daily").iloc[-1].all()}
+    rng = train_bsjp(code_list, day, use_ihsg, use_foreign)[2]
     if edge and today:
         prob = bsjp_probs(code_list, day, use_ihsg, use_foreign, live_at)
         picks = list(prob.reindex(today).dropna().sort_values(ascending=False).head(3).items())
@@ -505,16 +513,24 @@ def bsjp_view():
     if not picks:
         st.info(t["bsjp_none"], icon=":material/hourglass_empty:")
     for rank, (c, pr) in enumerate(picks, 1):
-        bsjp_card(c, frames[c], hist.get(c), window, pr, rank, c in rule)
+        bsjp_card(c, frames[c], hist.get(c), window, pr, rank, c in rule, rng.get(rank) if pr is not None else None)
 
 
-def bsjp_card(code, d, hist, window, prob=None, rank=None, rule_ok=True):
-    entry = float(d["Close"].iloc[-1])
-    stop, target, lots = idx.plan(entry, float(d["atr"].iloc[-1]), "daily", capital, max_alloc, risk_pct, factor)
-    rows = [(t["bsjp_now"], num(entry)), (t["bsjp_buy"], t["bsjp_buy_v"]),
-            (t["bsjp_sell"], t["bsjp_sell_v"].format(day=day_name(timing.next_trading_day(now.date())))),
-            (t["stop"], f"{num(stop)} ({pct((stop / entry - 1) * 100, 2)})", "down"),
-            (t["lots"], f"{num(lots)} lot"), (t["total"], f"Rp {num(lots * idx.LOT * entry * (1 + idx.BUY_FEE))}")]
+def bsjp_card(code, d, hist, window, prob=None, rank=None, rule_ok=True, rng=None):
+    last = float(d["Close"].iloc[-1])
+    # one tick of room so the auction order fills; the auction still charges the closing price, not the limit.
+    # The overnight edge is about one tick, so a close above this means skip, not chase.
+    max_px = last + idx.tick(last)
+    stop, target, lots = idx.plan(max_px, float(d["atr"].iloc[-1]), "daily", capital, max_alloc, risk_pct, factor)
+    signed = lambda x: ("+" if x > 0 else "") + pct(x, 2)  # noqa: E731
+    rows = [(t["bsjp_now"], num(last)), (t["bsjp_max"], num(max_px)),
+            (t["bsjp_buy"], t["bsjp_buy_v"].format(max=num(max_px))),
+            (t["bsjp_sell"], t["bsjp_sell_v"].format(day=day_name(timing.next_trading_day(now.date()))))]
+    if rng and rng["n"]:
+        rows.append((t["bsjp_range"], t["bsjp_range_v"].format(med=signed(rng["med"]), p25=signed(rng["p25"]),
+                                                               p75=signed(rng["p75"]))))
+    rows += [(t["stop"], f"{num(stop)} ({pct((stop / max_px - 1) * 100, 2)})", "down"),
+             (t["lots"], f"{num(lots)} lot"), (t["total"], f"Rp {num(lots * idx.LOT * max_px * (1 + idx.BUY_FEE))}")]
     if hist is not None and len(hist):
         rows.append((t["bsjp_stock_hist"], t["bsjp_stock_hist_v"].format(n=len(hist),
                                                                            avg=pct(hist["bsjp"].mean() * 100, 2))))
@@ -522,17 +538,20 @@ def bsjp_card(code, d, hist, window, prob=None, rank=None, rule_ok=True):
         chip = t["bsjp_chip"] if prob is None else t["bsjp_chip_ml"].format(rank=rank, prob=pct(prob * 100))
         st.markdown(stock_row(code, (chip, "up")), unsafe_allow_html=True)
         st.markdown(ui.ticket(rows), unsafe_allow_html=True)
+        st.caption(t["bsjp_how"].format(max=num(max_px)))
+        if rng and rng["n"]:
+            st.caption(t["bsjp_range_note"].format(n=num(rng["n"]), rank=rank, win=pct(rng["win"])))
         st.markdown(t["bsjp_rule_yes"] if rule_ok else t["bsjp_rule_no"])
         st.caption(t["bsjp_gap"])
         red = news_block(code)
         checks = [("window_bsjp" if k == "window" else k, ok, x) for k, ok, x in
-                  risk.gate(entry, stop, target, lots, capital, light, positions, trades, now.date(), limits,
+                  risk.gate(max_px, stop, target, lots, capital, light, positions, trades, now.date(), limits,
                             window_open=window, news_red=red)]
         ok = show_gate(checks)
         st.link_button(t["cta_buy"].format(code=code), f"https://stockbit.com/symbol/{code}",
                        icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
         if ok:
-            add_position(code, "bsjp", entry, lots, stop, target, f"bsjp_{code}")
+            add_position(code, "bsjp", max_px, lots, stop, target, f"bsjp_{code}")
 
 
 with tab_orb:
