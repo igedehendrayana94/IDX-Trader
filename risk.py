@@ -53,7 +53,7 @@ def _closed_today(journal, day):
 
 
 def gate(entry, stop, target, lots, capital, light, positions, journal, today, limits=DEFAULT_LIMITS,
-         window_open=True):
+         window_open=True, news_red=0):
     """Pre-trade checklist. Returns list of (check key, passed, detail dict). Any failure = BLOCK."""
     cost = lots * idx.LOT * entry * (1 + idx.BUY_FEE)
     open_cost = sum(p["lots"] * idx.LOT * p["price"] * (1 + idx.BUY_FEE) for p in positions)
@@ -76,6 +76,7 @@ def gate(entry, stop, target, lots, capital, light, positions, journal, today, l
          {"loss": -realised, "max": capital * limits["daily_loss_pct"] / 100}),
         ("streak", not (paused_until and today < paused_until), {"until": paused_until, "n": limits["loss_streak"]}),
         ("window", window_open, {}),
+        ("news", not news_red, {"n": news_red}),  # suspension/PKPU/default/UMA headline in the last 7 days
     ]
 
 
@@ -93,6 +94,7 @@ if __name__ == "__main__":
     args = dict(entry=5000, stop=4750, target=5500, lots=3, capital=10_000_000, today=today)
     assert passed(gate(light="green", positions=[], journal=[], **args))
     assert not passed(gate(light="red", positions=[], journal=[], **args))
+    assert not passed(gate(light="green", positions=[], journal=[], news_red=1, **args))  # red-flag headline blocks
     loss = lambda d, rp=-50_000: {"exit_date": d, "buy_date": d, "pnl_rp": rp}  # noqa: E731
     j3 = [loss("2026-11-12"), loss("2026-11-13"), loss("2026-11-13")]
     chk = dict((k, ok) for k, ok, _ in gate(light="green", positions=[], journal=j3, **args))

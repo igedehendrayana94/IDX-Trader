@@ -32,11 +32,11 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 ## UI/UX for novice traders (2026-11-14, ui-ux-pro-max skill)
 - Streamlit native only, theme in `.streamlit/config.toml` (primary teal #0E7C66: neutral, never read as gain/loss).
 - Answer first: 3 KPI cards (buy ideas today, IHSG + change, "use ML model?" Ya/Tidak), data date as caption.
-- Tabs: Rekomendasi | Prediksi ML | Semua saham | Panduan. Material icons only, no emoji; meaning never by colour alone.
+- Tabs: Rekomendasi | Day trading | Posisi saya | Jurnal | Semua saham | Panduan (ML tab removed 2026-11-16). Material icons only, no emoji; meaning never by colour alone.
 - Sidebar shows only language, trading style (with captions) and capital; the rest is in "Pengaturan lanjutan".
 - Buy card: metrics (buy price, SL with -%, target with +%, lots), Rp cost and max loss as % of capital, checklist of conditions met, ML line only when model has edge, 5y history, warning when the rule's history on that stock is negative, one primary button "Buka di Stockbit".
 - No signal: info box ("not buying is valid") + "Hampir memenuhi syarat" cards (missing exactly one condition).
-- ML tab: when no edge, the probability ranking is hidden inside the advanced expander.
+- ML reliability (AUC, walk-forward table, foreign-flow status) is an expander at the end of Rekomendasi; buy cards are ordered by ml_prob only when the mode has an edge.
 - Guide tab: 6-step how-to (incl. Stockbit Auto Order), glossary, risk box.
 - Check: AppTest over id/en x swing/daily with forced signals (temporary script, not committed).
 
@@ -90,3 +90,12 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 - 5m bars, last ~60 days (falling market), all stock-days: buy 13:45 and sell at close was least bad (-0.31%), 09:15 -0.47%, 15:40 -0.43%; overnight from any time -0.42% to -0.53%. ORB replay was -0.64%.
 - 15:30 check (5m bars, 58 days): 8 of 9 signals seen at 15:30 still held at the close (volume only grows), but only 8 of 20 close signals were visible at 15:30 (volume not there yet). Strict rule kept: short list, rarely wrong.
 - Built (2026-11-16): Day trading tab has a selector Pagi–siang (ORB) | Sore, jual besok pagi (BSJP). BSJP list = 4 daily conditions on today's delayed bar (`with_live`); card shows buy 15:50-16:00 pre-close, sell next trading day 08:45-09:00 pre-opening, lots from the daily plan's stop (stop only sizes: no overnight stop), 5y history per stock and overall from `idx.bsjp_backtest` (BSJP vs buy-next-morning, computed live). Risk gate window = 15:00-16:00 in session 2/pre-close (key `window_bsjp`). Positions mode `bsjp`: `timing.exit_check` ignores the buy day's own range and sets the deadline to the next trading day. Manual orb/bsjp positions without a saved stop now fall back to the daily plan (was a KeyError for orb).
+
+## ML inside recommendations + news (2026-11-16)
+- User asked to drop the "Prediksi ML" tab and use ML, habits and news to strengthen Rekomendasi and Day trading. Choices: keyword sentiment, news shown + red-flag veto only, ML shown only where proven.
+- Habits tested walk-forward (not adopted, noise): seasonality (day of week, month, turn of month) swing AUC 0.487 -> 0.490, daily 0.542 -> 0.542; each stock's own past win rate (expanding / 60-plan, labels lagged hold+1) no gain.
+- BSJP ML (`ml.dataset(..., "bsjp")`: label = buy at close, sell next open, net > 0): AUC 0.61 in every fold (0.60-0.63). Out-of-sample #1 pick per day +0.18% net (56% win, 8 of 9 quarters positive; latest quarter -0.73%), top 3 +0.04%, all stocks -0.24%. Drivers: atr_n, ret1, close_pos (close-auction rebound). Features from the 15:30 snapshot gave the same result as the final close over 58 days (#1 pick -0.21% vs -0.22%; all stocks -0.57%). Adopted: BSJP list = ML top 3 among liquid stocks with today's bar when AUC >= 0.53, else the 4-condition rule list; cards show "ML #n · p%" and whether the 4 rules also hold. Model fitted hourly (`train_bsjp`), probabilities on today's delayed bar every 5 min (`bsjp_probs`, last 300 bars per stock).
+- `ml.walk_forward` now also reports top1_avg% / top3_avg% (per-day ranking); `ml.fit` + `ml.predict_latest(p, m)`; `ml.hold(mode)`. Leakage check runs for bsjp too.
+- ORB: no ML (60 days of 5m bars too short); caption says so.
+- `news.py`: Google News RSS "saham CODE" (id), keeps headlines with the code in the title, last 7 days; keyword score (POS/NEG lists, longer phrase wins) and red flags (suspen*, PKPU, pailit, gagal bayar, delisting, fraud, UMA, FCA, default). Cached 30 min per stock, archived to data/news/YYYYMMDD.json (gitignored) for a future backtest. Cards in Rekomendasi, ORB live and BSJP show the counts, red-flag error and a headline list. Risk gate check `news` blocks a buy when a red-flag headline exists. yfinance has no IDX news.
+- Bug fixed: `idx.plan` and `orb.plan` rounded the target DOWN to the tick, so a 1.5R plan was just under 1.5 and the risk gate (min 1.5) blocked every Harian/ORB buy since the gate was added. Targets now round up (self-check asserts R:R >= plan).

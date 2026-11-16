@@ -8,6 +8,7 @@ import streamlit as st
 import idx
 import journal
 import ml
+import news
 import orb
 import risk
 import timing
@@ -20,6 +21,7 @@ DATA_DIR = Path(__file__).parent / "data"
 FOREIGN_DIR = DATA_DIR / "foreign"
 POSITIONS = DATA_DIR / "positions.json"
 JOURNAL = DATA_DIR / "journal.json"
+NEWS_DIR = DATA_DIR / "news"
 FOREIGN_MIN_DAYS = 60  # fewer days = feature mostly empty in training, no point using it
 
 # ---------- sidebar: only the choices a beginner must make are visible ----------
@@ -117,6 +119,31 @@ def load_timemachine(codes, today):
     return {c: orb.timemachine(b, today) for c, b in bars.items()}
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_news(code, today):
+    items = news.fetch(code)
+    news.save(items, NEWS_DIR, today)  # archive so the keyword score can be tested once months of headlines exist
+    return items
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def train_bsjp(code_list, day, use_ihsg, use_foreign):
+    p = ml.dataset(load(code_list, day), "bsjp", ihsg=load_ihsg(day) if use_ihsg else None,
+                   foreign=load_foreign() if use_foreign else None)
+    return ml.walk_forward(p, "bsjp"), ml.fit(p)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def bsjp_probs(code_list, day, use_ihsg, use_foreign, live_at):
+    """P(buy at today's close, sell next open ends in profit) from today's unfinished (delayed) bar.
+    live_at is only the cache key: new delayed prices -> new probabilities."""
+    m = train_bsjp(code_list, day, use_ihsg, use_foreign)[1]
+    recent = {c: with_live(c, data[c]).tail(300) for c in code_list if c in data}  # 300 bars cover every feature
+    p = ml.dataset(recent, "bsjp", ihsg=with_live("IHSG", ihsg) if use_ihsg else None,
+                   foreign=load_foreign() if use_foreign else None)
+    return ml.predict_latest(p, m)
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def bsjp_history(code_list, day):
     return {c: idx.bsjp_backtest(idx.indicators(d)) for c, d in load(code_list, day).items()}
@@ -130,7 +157,7 @@ def train(code_list, day, mode, use_ihsg, use_foreign):
 
 
 if refresh:
-    for f in (load, load_ihsg, load_live, bsjp_history, load_foreign, load_tv, load_intraday, load_timemachine, train):
+    for f in (load, load_ihsg, load_live, bsjp_history, train_bsjp, bsjp_probs, load_news, load_foreign, load_tv, load_intraday, load_timemachine, train):
         f.clear()
 
 # ---------- data ----------
@@ -187,6 +214,8 @@ def auto_refresh():
 
 auto_refresh()
 buys = df[df["signal"] & (df["lots"] > 0)]
+if has_edge:
+    buys = buys.sort_values("ml_prob", ascending=False)
 
 
 def tv_line(code, tv_d, tv_m):
@@ -210,6 +239,28 @@ def stock_row(code, chip=None):
     name = t["ihsg_name"] if code == "IHSG" else idx.NAMES.get(code, "")
     return ui.row(code, name, c.tail(30), c.iloc[-1], c.iloc[-1] - c.iloc[-2],
                   (c.iloc[-1] / c.iloc[-2] - 1) * 100, num, chip)
+
+
+def news_block(code):
+    """Headlines of the last 7 days with keyword sentiment; returns the number of red-flag headlines."""
+    s = news.summary(load_news(code, now.date()))
+    if not s["n"]:
+        st.caption(f":material/newspaper: {t['news_none']}")
+        return 0
+    st.markdown(f":material/newspaper: {t['news_line'].format(n=s['n'], pos=s['pos'], neg=s['neg'])}")
+    for i in s["red"][:2]:
+        st.error(t["news_red"].format(title=esc(i["title"])), icon=":material/report:")
+    with st.expander(t["news_list"]):
+        icon = {1: ":material/trending_up:", -1: ":material/trending_down:", 0: ":material/remove:"}
+        st.markdown("  \n".join(f"{icon[i['score']]} [{esc(i['title'])}]({i['link']}) · {i['time'][:10]}"
+                                for i in load_news(code, now.date())[:8]))
+        st.caption(t["news_note"])
+    return len(s["red"])
+
+
+def esc(text):
+    """Headline text safe for st.markdown (no links, LaTeX or emphasis from the title itself)."""
+    return re.sub(r"([\\`*_\[\]$<>#])", r"\\\1", text)
 
 
 def show_gate(checks, with_window=False):
@@ -256,9 +307,9 @@ if reg is not None:
         + " · ".join(reasons), icon=":material/traffic:")
     st.caption(t["reg_dist_help"])
 
-tab_rec, tab_orb, tab_pos, tab_jr, tab_ml, tab_all, tab_guide = st.tabs([
+tab_rec, tab_orb, tab_pos, tab_jr, tab_all, tab_guide = st.tabs([
     f":material/thumb_up: {t['tab_rec']}", f":material/bolt: {t['tab_orb']}", f":material/work: {t['tab_pos']}",
-    f":material/menu_book: {t['tab_journal']}", f":material/psychology: {t['tab_ml']}",
+    f":material/menu_book: {t['tab_journal']}",
     f":material/format_list_bulleted: {t['tab_all']}", f":material/school: {t['tab_guide']}",
 ])
 
@@ -297,8 +348,9 @@ with tab_rec:
                 (t["plan_check"], t["plan_check_v"]),
                 (t["plan_exit"], t["plan_exit_v"].format(day=day_name(sch["exit_deadline"])), "down"),
             ]), unsafe_allow_html=True)
+            red = news_block(r["code"])
             ok = show_gate(risk.gate(r["entry"], r["stop"], r["target"], r["lots"], capital, light, positions,
-                                     trades, now.date(), limits))
+                                     trades, now.date(), limits, news_red=red))
             st.link_button(t["cta_buy"].format(code=r["code"]), f"https://stockbit.com/symbol/{r['code']}",
                            icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
             if ok:
@@ -320,6 +372,18 @@ with tab_rec:
             html += stock_row(r["code"], (t["near_missing"].format(cond=cond_text[miss].split(":")[0]), "flat"))
         st.markdown(html, unsafe_allow_html=True)
 
+    with st.expander(t["ml_rel_title"].format(mode=t[mode]), icon=":material/psychology:"):
+        st.markdown(t["ml_intro"])
+        st.caption(t["ml_why"])
+        c1, c2 = st.columns([1, 2])
+        c1.metric(t["auc"], num(auc, 3), help=t["auc_help"], border=True)
+        (c2.success if has_edge else c2.warning)(t["ml_good"] if has_edge else t["ml_bad"],
+                                                 icon=":material/verified:" if has_edge else ":material/block:")
+        st.caption(t["foreign_ok"].format(n=foreign_days, used=t["foreign_used" if use_foreign else "foreign_wait"])
+                   if foreign_days else t["foreign_none"])
+        st.caption(t["ml_tech"])
+        st.dataframe(wf, hide_index=True, width="stretch")
+
 
 # ---------- day trading: opening range breakout ----------
 ORB_ORDER = ["open", "waiting", "forming", "target", "stop", "time", "expired", "no_range"]
@@ -330,6 +394,7 @@ ORB_CSS = {"open": "up", "target": "up", "stop": "down", "time": "flat"}
 def orb_view():
     st.markdown(t["orb_intro"])
     st.caption(f":material/schedule: {t['orb_delay']}")
+    st.caption(f":material/psychology: {t['orb_ml']}")
     liquid = tuple(df["code"])
     bars = load_intraday(liquid)
     if not bars:
@@ -393,8 +458,10 @@ def orb_card(code, res):
         chased = (res["last"] - entry) / (entry - stop)
         if chased > 0.5:
             st.warning(t["orb_chase"].format(r=num(chased, 1)), icon=":material/directions_run:")
+        red = news_block(code)
         ok = show_gate(risk.gate(entry, stop, target, lots, capital, light, positions, trades, now.date(), limits,
-                                 window_open=now.time() < orb.ENTRY_CUTOFF), with_window=True) and chased <= 0.5
+                                 window_open=now.time() < orb.ENTRY_CUTOFF, news_red=red), with_window=True) \
+            and chased <= 0.5
         st.link_button(t["cta_buy"].format(code=code), f"https://stockbit.com/symbol/{code}",
                        icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
         if ok:
@@ -414,23 +481,34 @@ def bsjp_view():
         (st.success if avg > 0 else st.warning)(
             t["bsjp_hist"].format(n=len(allh), avg=pct(avg, 2), win=pct((allh["bsjp"] > 0).mean() * 100),
                                   morning=pct(allh["morning"].mean() * 100, 2)), icon=":material/history:")
+    wf_b = train_bsjp(code_list, day, use_ihsg, use_foreign)[0]
+    edge = len(wf_b) and wf_b["auc"].mean() >= 0.53
+    if edge:
+        st.success(t["bsjp_ml_hist"].format(auc=num(wf_b["auc"].mean(), 2), top1=pct(wf_b["top1_avg%"].mean(), 2),
+                                            top3=pct(wf_b["top3_avg%"].mean(), 2), base=pct(wf_b["base_avg%"].mean(), 2),
+                                            last=pct(wf_b["top1_avg%"].iloc[-1], 2)), icon=":material/psychology:")
+    else:
+        st.caption(f":material/psychology: {t['bsjp_ml_none']}")
     window = phase in ("session2", "pre_close") and now.time() >= BSJP_FROM
     if not window:
         st.info(t["bsjp_wait"], icon=":material/schedule:")
     st.subheader(t["bsjp_list"], anchor=False)
-    picks = []
-    for c in df["code"]:
-        if c in live:  # only stocks with a bar for today; signal on today's unfinished (delayed) bar
-            d = idx.indicators(with_live(c, data[c]))
-            if idx.conditions(d, "daily").iloc[-1].all():
-                picks.append((c, d))
+    today = [c for c in df["code"] if c in live]  # liquid stocks with a bar for today (delayed, unfinished)
+    frames = {c: idx.indicators(with_live(c, data[c])) for c in today}
+    rule = {c for c, d in frames.items() if idx.conditions(d, "daily").iloc[-1].all()}
+    if edge and today:
+        prob = bsjp_probs(code_list, day, use_ihsg, use_foreign, live_at)
+        picks = list(prob.reindex(today).dropna().sort_values(ascending=False).head(3).items())
+        st.caption(t["bsjp_ml_pick"])
+    else:
+        picks = [(c, None) for c in rule]
     if not picks:
         st.info(t["bsjp_none"], icon=":material/hourglass_empty:")
-    for c, d in picks:
-        bsjp_card(c, d, hist.get(c), window)
+    for rank, (c, pr) in enumerate(picks, 1):
+        bsjp_card(c, frames[c], hist.get(c), window, pr, rank, c in rule)
 
 
-def bsjp_card(code, d, hist, window):
+def bsjp_card(code, d, hist, window, prob=None, rank=None, rule_ok=True):
     entry = float(d["Close"].iloc[-1])
     stop, target, lots = idx.plan(entry, float(d["atr"].iloc[-1]), "daily", capital, max_alloc, risk_pct, factor)
     rows = [(t["bsjp_now"], num(entry)), (t["bsjp_buy"], t["bsjp_buy_v"]),
@@ -441,12 +519,15 @@ def bsjp_card(code, d, hist, window):
         rows.append((t["bsjp_stock_hist"], t["bsjp_stock_hist_v"].format(n=len(hist),
                                                                            avg=pct(hist["bsjp"].mean() * 100, 2))))
     with st.container(border=True):
-        st.markdown(stock_row(code, (t["bsjp_chip"], "up")), unsafe_allow_html=True)
+        chip = t["bsjp_chip"] if prob is None else t["bsjp_chip_ml"].format(rank=rank, prob=pct(prob * 100))
+        st.markdown(stock_row(code, (chip, "up")), unsafe_allow_html=True)
         st.markdown(ui.ticket(rows), unsafe_allow_html=True)
+        st.markdown(t["bsjp_rule_yes"] if rule_ok else t["bsjp_rule_no"])
         st.caption(t["bsjp_gap"])
+        red = news_block(code)
         checks = [("window_bsjp" if k == "window" else k, ok, x) for k, ok, x in
                   risk.gate(entry, stop, target, lots, capital, light, positions, trades, now.date(), limits,
-                            window_open=window)]
+                            window_open=window, news_red=red)]
         ok = show_gate(checks)
         st.link_button(t["cta_buy"].format(code=code), f"https://stockbit.com/symbol/{code}",
                        icon=":material/open_in_new:", type="primary", width="stretch", disabled=not ok)
@@ -568,34 +649,6 @@ with tab_jr:
         })
         st.subheader(t["j_list"], anchor=False)
         st.dataframe(sorted(trades, key=lambda j: j["exit_date"], reverse=True), hide_index=True, width="stretch")
-
-# ---------- ML ----------
-with tab_ml:
-    st.markdown(t["ml_intro"])
-    st.caption(t["ml_why"])
-    c1, c2 = st.columns([1, 2])
-    c1.metric(t["auc"], num(auc, 3), help=t["auc_help"], border=True)
-    if has_edge:
-        c2.success(t["ml_good"], icon=":material/verified:")
-    else:
-        c2.warning(t["ml_bad"], icon=":material/block:")
-    # without a proven edge, the ranking goes behind the expander so beginners do not act on it
-    details = st.expander(t["details"], icon=":material/science:")
-    with st.container() if has_edge else details:
-        st.subheader(t["top"], anchor=False)
-        top = df.sort_values("ml_prob", ascending=False).head(10)[["code", "ml_prob", "signal", "close"]]
-        st.dataframe(top, hide_index=True, width="stretch", column_config={
-            "code": col_text["code"][0],
-            "ml_prob": st.column_config.ProgressColumn(t["prob"], min_value=0, max_value=1, format="percent"),
-            "signal": st.column_config.CheckboxColumn(col_text["signal"][0], help=col_text["signal"][1]),
-            "close": st.column_config.NumberColumn(col_text["close"][0], format="localized"),
-        })
-    st.caption(t["foreign_ok"].format(n=foreign_days, used=t["foreign_used" if use_foreign else "foreign_wait"])
-               if foreign_days else t["foreign_none"])
-    with details:
-        st.caption(t["ml_tech"])
-        st.dataframe(wf, hide_index=True, width="stretch")
-
 
 # ---------- all stocks ----------
 def table(view):

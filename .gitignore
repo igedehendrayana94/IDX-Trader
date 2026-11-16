@@ -5,3 +5,4 @@ data/foreign/*
 !data/foreign/.gitkeep
 data/positions.json
 data/journal.json
+data/news/

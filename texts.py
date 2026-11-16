@@ -27,7 +27,7 @@ T = {
         "kpi_buys": "Buy ideas today", "kpi_ihsg": "IHSG (market index)", "kpi_ml": "Use ML model?",
         "kpi_date": "Signals from close of", "live_at": "Prices {time} WIB (~15 min delayed)", "ml_on": "Yes", "ml_off": "No",
         # tabs
-        "tab_rec": "Recommendations", "tab_ml": "ML prediction", "tab_all": "All stocks", "tab_guide": "Guide",
+        "tab_rec": "Recommendations", "tab_all": "All stocks", "tab_guide": "Guide",
         # recommendations
         "rec_intro": "Stocks that meet **all** {n} conditions of the {mode} style today. "
                      "Buy at the next market open, then set the stop loss and target in Stockbit right away.",
@@ -114,6 +114,8 @@ T = {
             "streak": ("No {n} losses in a row", "{n} losses in a row: take a break until {until}"),
             "window": ("Within the entry window", "Entry window closed (after 14:30)"),
             "window_bsjp": ("Within the BSJP buy window (15:00–16:00)", "Outside the BSJP buy window (15:00–16:00 on trading days)"),
+            "news": ("No danger headline (suspension, PKPU, bankruptcy, default, UMA) in the last 7 days",
+                     "Danger headline in the last 7 days ({n}): suspension, PKPU, bankruptcy, default or UMA"),
         },
         "bought": "I bought it: add to My positions", "bought_ok": "Added to My positions.",
         # ORB
@@ -137,6 +139,24 @@ T = {
         # positions / journal
         "orb": "Day trade (ORB)",
         "bsjp": "BSJP (buy at close)",
+        "ml_rel_title": "How reliable is the ML model for the {mode} style?",
+        "orb_ml": "ML is not used for ORB: 5-minute data only goes back about 60 days, too little to test a model.",
+        "bsjp_ml_hist": "ML model for BSJP, tested walk-forward on 4 blocks of 120 days it never saw: AUC {auc}. "
+                        "Its #1 pick each day averaged {top1} per trade after fees, its top 3 {top3}, all stocks "
+                        "{base}. Latest block (falling market): #1 pick {last}. Ranking helps; profit is not "
+                        "guaranteed.",
+        "bsjp_ml_none": "The BSJP ML model has no proven edge at the moment, so the list uses the 4 Daily conditions only.",
+        "bsjp_ml_pick": "Ranked by the ML model: the 3 liquid stocks with the highest chance that buying at today's "
+                        "close and selling at the next open ends in profit.",
+        "bsjp_chip_ml": "ML #{rank} · {prob}",
+        "bsjp_rule_yes": ":material/check_circle: Also meets all 4 Daily conditions (breakout, strong close, volume, green).",
+        "bsjp_rule_no": ":material/info: Picked by ML only; does not meet all 4 Daily conditions.",
+        "news_none": "No news about this stock in the last 7 days.",
+        "news_line": "News (7 days): {n} headlines · {pos} positive · {neg} negative",
+        "news_red": "Danger headline: {title}",
+        "news_list": "Latest headlines",
+        "news_note": "Sentiment from a keyword list on Indonesian headlines (Google News). Rough guide only; it is not "
+                     "used to pick stocks because news history is too short to test. Headlines are saved in data/news.",
         "dt_when": "When to buy",
         "dt_opt": {"orb": "Morning–midday (ORB)", "bsjp": "Afternoon close, sell next morning (BSJP)"},
         "bsjp_intro": "Buy at the close, sell next morning (BSJP): 1) from 15:00, the list shows stocks meeting all 4 "
@@ -186,7 +206,7 @@ T = {
         "near_intro": "These stocks meet all but one condition. They are not buy signals yet.",
         "near_missing": "Still missing: {cond}",
         "zero_lots": "Capital too small to buy 1 lot of: {codes}.",
-        # ML tab
+        # ML reliability panel (end of the recommendations tab)
         "ml_intro": "The model learned from 5 years of prices to estimate the chance that each stock's "
                     "trade plan (buy price, stop loss, target) ends in profit.",
         "ml_good": "In testing on data it never saw, the model picked winners better than chance. "
@@ -252,7 +272,7 @@ T = {
         "no_liquid": "Tidak ada saham yang lolos filter likuiditas. Turunkan batasnya di Pengaturan lanjutan.",
         "kpi_buys": "Ide beli hari ini", "kpi_ihsg": "IHSG (indeks pasar)", "kpi_ml": "Pakai model ML?",
         "kpi_date": "Sinyal dari penutupan", "live_at": "Harga pukul {time} WIB (tertunda ±15 menit)", "ml_on": "Ya", "ml_off": "Tidak",
-        "tab_rec": "Rekomendasi", "tab_ml": "Prediksi ML", "tab_all": "Semua saham", "tab_guide": "Panduan",
+        "tab_rec": "Rekomendasi", "tab_all": "Semua saham", "tab_guide": "Panduan",
         "rec_intro": "Saham yang memenuhi **semua** ({n}) syarat gaya {mode} hari ini. Beli saat pasar buka "
                      "berikutnya, lalu segera pasang *stop loss* dan target di Stockbit.",
         "buy": "Beli", "entry": "Harga beli", "stop": "Stop loss", "target": "Target", "lots": "Lot",
@@ -336,6 +356,8 @@ T = {
             "streak": ("Tidak ada {n} rugi beruntun", "{n} kali rugi beruntun: istirahat sampai {until}"),
             "window": ("Masih dalam jam masuk", "Jam masuk sudah lewat (setelah 14:30)"),
             "window_bsjp": ("Dalam jam beli BSJP (15:00–16:00)", "Di luar jam beli BSJP (15:00–16:00 pada hari bursa)"),
+            "news": ("Tidak ada berita bahaya (suspensi, PKPU, pailit, gagal bayar, UMA) dalam 7 hari terakhir",
+                     "Ada berita bahaya dalam 7 hari terakhir ({n}): suspensi, PKPU, pailit, gagal bayar, atau UMA"),
         },
         "bought": "Saya sudah beli: tambah ke Posisi saya", "bought_ok": "Ditambahkan ke Posisi saya.",
         "tab_orb": "Day trading",
@@ -357,6 +379,25 @@ T = {
         "orb_table": "Per saham (60 hari)",
         "orb": "Day trade (ORB)",
         "bsjp": "BSJP (beli sore)",
+        "ml_rel_title": "Seberapa andal model ML untuk gaya {mode}?",
+        "orb_ml": "ML tidak dipakai untuk ORB: data 5 menit hanya tersedia sekitar 60 hari, terlalu sedikit untuk menguji model.",
+        "bsjp_ml_hist": "Model ML untuk BSJP, diuji *walk-forward* pada 4 blok 120 hari yang belum pernah dilihat: AUC "
+                        "{auc}. Pilihan #1 setiap hari rata-rata {top1} per transaksi setelah biaya, 3 teratas {top3}, "
+                        "semua saham {base}. Blok terakhir (pasar turun): pilihan #1 {last}. Peringkat membantu, "
+                        "tetapi untung tidak dijamin.",
+        "bsjp_ml_none": "Model ML untuk BSJP saat ini belum terbukti unggul, jadi daftar hanya memakai 4 syarat Harian.",
+        "bsjp_ml_pick": "Diurutkan oleh model ML: 3 saham likuid dengan peluang tertinggi bahwa beli pada penutupan hari "
+                        "ini dan jual pada pembukaan berikutnya berakhir untung.",
+        "bsjp_chip_ml": "ML #{rank} · {prob}",
+        "bsjp_rule_yes": ":material/check_circle: Juga memenuhi 4 syarat Harian (*breakout*, tutup kuat, volume, hijau).",
+        "bsjp_rule_no": ":material/info: Dipilih oleh ML saja; tidak memenuhi semua 4 syarat Harian.",
+        "news_none": "Tidak ada berita tentang saham ini dalam 7 hari terakhir.",
+        "news_line": "Berita (7 hari): {n} judul · {pos} positif · {neg} negatif",
+        "news_red": "Berita bahaya: {title}",
+        "news_list": "Judul berita terbaru",
+        "news_note": "Sentimen dari daftar kata kunci pada judul berita berbahasa Indonesia (Google News). Hanya panduan "
+                     "kasar; tidak dipakai untuk memilih saham karena riwayat berita terlalu pendek untuk diuji. Judul "
+                     "disimpan di data/news.",
         "dt_when": "Waktu beli",
         "dt_opt": {"orb": "Pagi–siang (ORB)", "bsjp": "Sore, jual besok pagi (BSJP)"},
         "bsjp_intro": "Beli sore jual pagi (BSJP): 1) mulai 15:00 daftar menampilkan saham yang memenuhi 4 syarat gaya "

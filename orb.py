@@ -35,7 +35,7 @@ def plan(hi, lo, entry):
     stop = idx.round_tick(max((hi + lo) / 2, entry * (1 - idx.MAX_LOSS)), up=True)
     if stop >= entry:
         stop = entry - idx.tick(entry)
-    return stop, idx.round_tick(entry + RR * (entry - stop))
+    return stop, idx.round_tick(entry + RR * (entry - stop), up=True)  # up: R:R stays >= RR for the risk gate
 
 
 def day(bars, now=None):
@@ -99,12 +99,12 @@ if __name__ == "__main__":
         return pd.DataFrame([p[1:] for p in prices], index=ix, columns=["Open", "High", "Low", "Close"])
 
     rng = [("09:00", 1000, 1010, 990, 1005), ("09:05", 1005, 1020, 1000, 1015), ("09:10", 1015, 1020, 1005, 1010)]
-    # breakout at 09:20 close 1030 -> stop mid 1005, target 1030+1.5*25=1067.5 -> 1065
+    # breakout at 09:20 close 1030 -> stop mid 1005, target 1030+1.5*25=1067.5 -> 1070 (rounded up: R:R never below 1.5)
     win = mk(rng + [("09:15", 1010, 1020, 1008, 1018), ("09:20", 1018, 1032, 1016, 1030),
                     ("10:00", 1030, 1070, 1028, 1060), ("15:45", 1060, 1062, 1055, 1058)])
     r = day(win)
-    assert r["status"] == "target" and r["entry"] == 1030 and r["stop"] == 1005 and r["target"] == 1065, r
-    assert r["ret"] > 0 and abs(r["r"] - 1.4) < 1e-9
+    assert r["status"] == "target" and r["entry"] == 1030 and r["stop"] == 1005 and r["target"] == 1070, r
+    assert r["ret"] > 0 and abs(r["r"] - 1.6) < 1e-9
     lose = mk(rng + [("09:20", 1018, 1032, 1016, 1030), ("10:00", 1030, 1031, 1000, 1002)])
     assert day(lose)["status"] == "stop" and day(lose)["ret"] < 0
     flat = mk(rng + [("09:20", 1010, 1018, 1005, 1012), ("15:45", 1012, 1015, 1008, 1010)])

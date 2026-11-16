@@ -179,7 +179,7 @@ def plan(entry, atr, mode, capital, max_alloc, risk_pct=1.0, factor=1.0):
     stop = round_tick(stop, up=True)  # rounding up keeps loss within the cap
     if stop >= entry:
         stop = entry - tick(entry)
-    target = round_tick(entry + m["rr"] * (entry - stop))
+    target = round_tick(entry + m["rr"] * (entry - stop), up=True)  # up: R:R never falls below the plan (risk gate)
     return stop, target, size_lots(capital, risk_pct, entry, stop, max_alloc, factor)
 
 
@@ -269,6 +269,7 @@ if __name__ == "__main__":
             stop, target, lots = plan(entry, atr, mode, 10_000_000, 0.25)
             assert stop < entry and (entry - stop) / entry <= MAX_LOSS + 1e-9, (mode, entry, stop)
             assert stop % tick(stop) == 0 and target > entry
+            assert (target - entry) / (entry - stop) >= MODES[mode]["rr"] - 1e-9, (mode, entry, stop, target)
             assert lots * LOT * entry * (1 + BUY_FEE) <= 2_500_000
     # BSJP history: signal day 2 (breakout on 2x volume, closed at the high) -> buy 1100 close, sell 1120 open
     b = pd.DataFrame({"Open": [1000] * 21 + [1000, 1120], "High": [1010] * 21 + [1100, 1130],

@@ -12,6 +12,11 @@ IHSG = ["ihsg_ret5", "ihsg_ret20", "ihsg_dist_ema50", "ihsg_vol20", "rel_ihsg20"
 FOREIGN = ["fnet5", "fnet20"]
 
 
+def hold(mode):
+    """Days a plan is held; bsjp = bought at the close, sold at the next open."""
+    return idx.MODES[mode]["hold"] if mode in idx.MODES else 1
+
+
 def cols(p):
     """Features present in this dataset (IHSG and foreign flow are optional inputs)."""
     return [c for c in FEATURES + IHSG + FOREIGN if c in p.columns]
@@ -37,18 +42,22 @@ def features(d):
 
 
 def dataset(data, mode, ihsg=None, foreign=None):
-    """Panel of (date, code, features, label, ret). Label = plan from that day's close ends with net profit.
+    """Panel of (date, code, features, label, ret). Label = plan from that day's close ends with net profit;
+    mode "bsjp": buying at that close and selling at the next open ends with net profit.
     Last `hold` rows per stock have no complete outcome: label NaN, used only for prediction."""
-    hold = idx.MODES[mode]["hold"]
+    h = hold(mode)
     parts = []
     for code, df in data.items():
         d = idx.indicators(df)
         f = features(d)
         arr = idx.ohlca(d)
         n = len(d)
-        ret = np.full(n, np.nan)
-        for i in range(50, n - hold):  # need full horizon after entry day i+1
-            ret[i] = idx.outcome(arr, i, mode)[0]
+        if mode == "bsjp":
+            ret = (d["Open"].shift(-1) * (1 - idx.SELL_FEE) / (d["Close"] * (1 + idx.BUY_FEE)) - 1).to_numpy()
+        else:
+            ret = np.full(n, np.nan)
+            for i in range(50, n - h):  # need full horizon after entry day i+1
+                ret[i] = idx.outcome(arr, i, mode)[0]
         if foreign is not None and len(foreign):
             # net foreign shares over 5/20 days, scaled by normal volume so stocks are comparable
             fn = foreign[foreign["code"] == code].groupby("date")["fnet"].sum().reindex(d.index)
@@ -75,7 +84,7 @@ def model():
 
 def walk_forward(p, mode, folds=4, test_days=120):
     """Train only on dates before each test block, with a gap of `hold`+1 days so labels never overlap the test."""
-    gap = idx.MODES[mode]["hold"] + 1
+    gap = hold(mode) + 1
     lab, X = p[p["y"].notna()], cols(p)
     dates = np.sort(lab["date"].unique())
     rows = []
@@ -88,20 +97,26 @@ def walk_forward(p, mode, folds=4, test_days=120):
         test = lab[lab["date"].isin(test_dates)]
         prob = model().fit(train[X], train["y"]).predict_proba(test[X])[:, 1]
         top = test[prob >= np.quantile(prob, 0.9)]
+        rank = pd.Series(prob, index=test.index).groupby(test["date"]).rank(ascending=False)
         rows.append({
             "test_from": pd.Timestamp(test_dates[0]).date(), "test_to": pd.Timestamp(test_dates[-1]).date(),
             "auc": roc_auc_score(test["y"], prob), "base_win%": test["y"].mean() * 100,
             "top10_win%": top["y"].mean() * 100, "base_avg%": test["ret"].mean() * 100,
-            "top10_avg%": top["ret"].mean() * 100, "n_test": len(test),
+            "top10_avg%": top["ret"].mean() * 100, "top1_avg%": test["ret"][rank <= 1].mean() * 100,
+            "top3_avg%": test["ret"][rank <= 3].mean() * 100, "n_test": len(test),
         })
     return pd.DataFrame(rows).round(2)
 
 
-def predict_latest(p):
-    """Fit on all labeled rows, return P(profit) for each stock's latest day."""
-    lab, X = p[p["y"].notna()], cols(p)
+def fit(p):
+    lab = p[p["y"].notna()]
+    return model().fit(lab[cols(p)], lab["y"])
+
+
+def predict_latest(p, m=None):
+    """P(profit) for each stock's latest day; fits on all labeled rows unless a fitted model is given."""
     last = p.sort_values("date").groupby("code").tail(1)
-    prob = model().fit(lab[X], lab["y"]).predict_proba(last[X])[:, 1]
+    prob = (m or fit(p)).predict_proba(last[cols(p)])[:, 1]
     return pd.Series(prob, index=last["code"].to_numpy(), name="ml_prob")
 
 
@@ -115,7 +130,7 @@ if __name__ == "__main__":
         o = c * np.exp(rng.normal(0, 0.005, len(dates)))
         data[f"S{s}"] = pd.DataFrame({"Open": o, "High": np.maximum(o, c) * 1.01, "Low": np.minimum(o, c) * 0.99,
                                       "Close": c, "Volume": rng.integers(1e6, 2e6, len(dates))}, index=dates)
-    for mode in idx.MODES:
+    for mode in [*idx.MODES, "bsjp"]:
         wf = walk_forward(dataset(data, mode), mode)
         assert len(wf) and wf["auc"].between(0.44, 0.56).all(), wf
     print("ok")
