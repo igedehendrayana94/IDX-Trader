@@ -66,3 +66,7 @@ Small dashboard that screens Indonesian (IDX) stocks and gives buy candidates wi
 - `journal.py`: JSON storage (`data/positions.json`, `data/journal.json`, gitignored), close position -> journal row (P/L Rp, %, R), stats (win rate, expectancy, profit factor, avg R, loss streak), ISO-week digest, coaching notes. Tab "Jurnal".
 - Positions now store stop/target when added via "I bought it"; `timing.exit_check` uses them; ORB positions hold 1 day.
 - Checks: `python risk.py|orb.py|journal.py|timing.py` self-checks; AppTest end-to-end (red blocks, green buy -> position -> close -> journal; simulated live ORB session with temporary scripts, not committed).
+
+## Data source decision (2026-11-16)
+- Keep yfinance (delayed ~10-15 min). Realtime IDX needs a paid licensed feed (IDX/ICE; TwelveData, Oanor unverified); swing/daily trade on daily closes so delay does not matter, and ORB replay lost money anyway. Revisit only if ORB gets an edge.
+- `app.py` clears the `load()` cache when Yahoo returns nothing, so a transient failure retries on next rerun instead of showing "Data tidak tersedia" for 1h.
