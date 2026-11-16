@@ -139,6 +139,28 @@ T = {
         # positions / journal
         "orb": "Day trade (ORB)",
         "bsjp": "BSJP (buy at close)",
+        "tab_acc": "Accuracy",
+        "acc_intro": "What the app recommended in a period, and what the real prices did afterwards. Each period is "
+                     "replayed fairly: the ML model only knows results from before the period starts, like the app on "
+                     "that day.",
+        "acc_period": "Period",
+        "acc_opt": {"month": "This month", "this_week": "This week", "last_week": "Last week", "custom": "Pick dates"},
+        "acc_dates": "From – to",
+        "acc_pick_end": "Pick the end date too.",
+        "acc_loading": "Replaying the period and checking real prices (about half a minute the first time)…",
+        "acc_caption": "Period {first} – {last} · prices up to {data} · results after fees, finished trades only",
+        "acc_empty": "No finished trading day in this period yet. Results appear after 16:15 WIB on a trading day.",
+        "acc_small": "Small sample: under 30 finished trades per menu. A few lucky or unlucky days move these numbers a "
+                     "lot; judge the model over several months, not one week.",
+        "acc_how": "How to read this: **Accuracy** = share of finished picks that made a profit after fees. **ML "
+                   "prediction** = the model's average chance of profit for those picks; close to the accuracy means the "
+                   "model is honest about its confidence. **Average result** vs **All stocks** shows whether the picks "
+                   "beat buying any liquid stock that day. **AUC** = how well the model ranked all liquid stocks in "
+                   "the period: 0.5 = coin flip, above 0.53 = useful.",
+        "acc_weekly": "Per week",
+        "acc_bsjp_rows": "BSJP picks vs real opening price ({n})",
+        "acc_rek_rows": "Swing/Daily picks vs real exit price ({n})",
+        "acc_xlsx": "Download Excel", "acc_csv_bsjp": "CSV BSJP", "acc_csv_rek": "CSV Recommendations",
         "ml_rel_title": "How reliable is the ML model for the {mode} style?",
         "orb_ml": "ML is not used for ORB: 5-minute data only goes back about 60 days, too little to test a model.",
         "bsjp_ml_hist": "ML model for BSJP, tested walk-forward on 4 blocks of 120 days it never saw: AUC {auc}. "
@@ -388,6 +410,28 @@ T = {
         "orb_table": "Per saham (60 hari)",
         "orb": "Day trade (ORB)",
         "bsjp": "BSJP (beli sore)",
+        "tab_acc": "Akurasi",
+        "acc_intro": "Apa yang direkomendasikan aplikasi dalam satu periode, dan bagaimana harga sebenarnya sesudahnya. "
+                     "Setiap periode diputar ulang secara adil: model ML hanya mengetahui hasil sebelum periode dimulai, "
+                     "sama seperti aplikasi pada hari itu.",
+        "acc_period": "Periode",
+        "acc_opt": {"month": "Bulan ini", "this_week": "Minggu ini", "last_week": "Minggu lalu", "custom": "Pilih tanggal"},
+        "acc_dates": "Dari – sampai",
+        "acc_pick_end": "Pilih juga tanggal akhirnya.",
+        "acc_loading": "Memutar ulang periode dan mengecek harga sebenarnya (sekitar setengah menit untuk pertama kali)…",
+        "acc_caption": "Periode {first} – {last} · harga sampai {data} · hasil setelah biaya, hanya transaksi yang selesai",
+        "acc_empty": "Belum ada hari bursa yang selesai dalam periode ini. Hasil muncul setelah 16:15 WIB pada hari bursa.",
+        "acc_small": "Sampel kecil: kurang dari 30 transaksi selesai per menu. Beberapa hari untung atau rugi sangat "
+                     "menggeser angka ini; nilai model dari beberapa bulan, bukan satu minggu.",
+        "acc_how": "Cara membaca: **Akurasi** = bagian pilihan yang selesai dan untung setelah biaya. **Prediksi ML** = "
+                   "rata-rata peluang untung menurut model untuk pilihan itu; jika dekat dengan akurasi, model jujur "
+                   "tentang keyakinannya. **Rata-rata hasil** dibanding **Semua saham** menunjukkan apakah pilihan lebih "
+                   "baik daripada membeli saham likuid mana saja pada hari itu. **AUC** = seberapa baik model "
+                   "mengurutkan semua saham likuid dalam periode: 0,5 = menebak acak, di atas 0,53 = berguna.",
+        "acc_weekly": "Per minggu",
+        "acc_bsjp_rows": "Pilihan BSJP vs harga pembukaan sebenarnya ({n})",
+        "acc_rek_rows": "Pilihan Swing/Harian vs harga keluar sebenarnya ({n})",
+        "acc_xlsx": "Unduh Excel", "acc_csv_bsjp": "CSV BSJP", "acc_csv_rek": "CSV Rekomendasi",
         "ml_rel_title": "Seberapa andal model ML untuk gaya {mode}?",
         "orb_ml": "ML tidak dipakai untuk ORB: data 5 menit hanya tersedia sekitar 60 hari, terlalu sedikit untuk menguji model.",
         "bsjp_ml_hist": "Model ML untuk BSJP, diuji *walk-forward* pada 4 blok 120 hari yang belum pernah dilihat: AUC "

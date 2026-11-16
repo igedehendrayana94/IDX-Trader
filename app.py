@@ -1,5 +1,6 @@
 import re
-from datetime import datetime, time
+import io
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +11,7 @@ import journal
 import ml
 import news
 import orb
+import report
 import risk
 import timing
 import ui
@@ -312,11 +314,11 @@ if reg is not None:
         + " · ".join(reasons), icon=":material/traffic:")
     st.caption(t["reg_dist_help"])
 
-tab_rec, tab_orb, tab_pos, tab_jr, tab_all, tab_guide = st.tabs([
+tab_rec, tab_orb, tab_pos, tab_jr, tab_acc, tab_all, tab_guide = st.tabs([
     f":material/thumb_up: {t['tab_rec']}", f":material/bolt: {t['tab_orb']}", f":material/work: {t['tab_pos']}",
-    f":material/menu_book: {t['tab_journal']}",
+    f":material/menu_book: {t['tab_journal']}", f":material/fact_check: {t['tab_acc']}",
     f":material/format_list_bulleted: {t['tab_all']}", f":material/school: {t['tab_guide']}",
-])
+], on_change="rerun", key="main_tab")  # rerun -> tab.open, so Akurasi runs only when open
 
 # ---------- recommendations (swing / daily) ----------
 with tab_rec:
@@ -668,6 +670,80 @@ with tab_jr:
         })
         st.subheader(t["j_list"], anchor=False)
         st.dataframe(sorted(trades, key=lambda j: j["exit_date"], reverse=True), hide_index=True, width="stretch")
+
+# ---------- accuracy: what the app recommended vs real prices ----------
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_accuracy(first, last, day):
+    """Point-in-time replay of first..last (see report.py); day = cache key for the closed data."""
+    raw = {c: with_live(c, data[c]) for c in data}  # today's bar gives the latest BSJP sell price (next open)
+    return report.replay(pd.Timestamp(first), pd.Timestamp(last), raw=raw, data=data, ihsg=ihsg)
+
+
+ACC_PCT = ["Akurasi (untung/selesai)", "Prediksi ML rata-rata", "Rata-rata hasil bersih", "Semua saham (pembanding)"]
+
+
+def acc_table(df):
+    cfg = {c: st.column_config.NumberColumn(c, format="percent") for c in ACC_PCT}
+    cfg["AUC periode"] = st.column_config.NumberColumn("AUC periode", format="%.2f", help=t["auc_help"])
+    cfg["Total untung/rugi per lot (Rp)"] = st.column_config.NumberColumn("Total untung/rugi per lot (Rp)",
+                                                                          format="localized")
+    st.dataframe(df, hide_index=True, width="stretch", column_config=cfg)
+
+
+def acc_view():
+    st.markdown(t["acc_intro"])
+    choice = st.segmented_control(t["acc_period"], ["month", "this_week", "last_week", "custom"], default="month",
+                                  required=True, format_func=lambda k: t["acc_opt"][k], key="acc_period")
+    today = now.date()
+    monday = today - timedelta(days=today.weekday())
+    if choice == "this_week":
+        first, last = monday, monday + timedelta(days=6)
+    elif choice == "last_week":
+        first, last = monday - timedelta(days=7), monday - timedelta(days=1)
+    elif choice == "month":
+        first, last = today.replace(day=1), (pd.Timestamp(today) + pd.offsets.MonthEnd(0)).date()
+    else:
+        picked = st.date_input(t["acc_dates"], value=(today.replace(day=1), today), max_value=today,
+                               format="DD/MM/YYYY")
+        if len(picked) != 2:
+            st.info(t["acc_pick_end"], icon=":material/date_range:")
+            return
+        first, last = picked
+    with st.spinner(t["acc_loading"]):
+        bsjp, rek, info, scored = load_accuracy(first, last, day)
+    st.caption(t["acc_caption"].format(first=f"{first:%d/%m/%Y}", last=f"{last:%d/%m/%Y}",
+                                       data=f"{info['data_to']:%d/%m/%Y}"))
+    if bsjp.empty and rek.empty:
+        st.info(t["acc_empty"], icon=":material/hourglass_empty:")
+        return
+    summary = report.summarize(bsjp, rek, scored)
+    acc_table(summary.drop(columns="Minggu"))
+    if summary["Selesai"].max() < 30:
+        st.warning(t["acc_small"], icon=":material/science:")
+    st.info(t["acc_how"], icon=":material/help:")
+    if (last - first).days > 6:
+        st.subheader(t["acc_weekly"], anchor=False)
+        acc_table(report.summarize(bsjp, rek, scored, by_week=True))
+    with st.expander(t["acc_bsjp_rows"].format(n=len(bsjp)), icon=":material/nightlight:"):
+        st.dataframe(bsjp, hide_index=True, width="stretch")
+    with st.expander(t["acc_rek_rows"].format(n=len(rek)), icon=":material/thumb_up:"):
+        st.dataframe(rek, hide_index=True, width="stretch")
+    buf = io.BytesIO()
+    report.build(f"{first:%d/%m/%Y}–{last:%d/%m/%Y}", bsjp, rek, info).save(buf)
+    c1, c2, c3 = st.columns(3)
+    name = f"idx_trader_{first:%Y%m%d}_{last:%Y%m%d}"
+    c1.download_button(t["acc_xlsx"], buf.getvalue(), f"{name}.xlsx", icon=":material/table_view:", width="stretch",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    c2.download_button(t["acc_csv_bsjp"], bsjp.to_csv(index=False), f"{name}_bsjp.csv", icon=":material/download:",
+                       width="stretch", mime="text/csv")
+    c3.download_button(t["acc_csv_rek"], rek.to_csv(index=False), f"{name}_rekomendasi.csv",
+                       icon=":material/download:", width="stretch", mime="text/csv")
+
+
+with tab_acc:
+    if tab_acc.open:  # the replay is heavy (~30 s cold): run it only when this tab is selected
+        acc_view()
+
 
 # ---------- all stocks ----------
 def table(view):

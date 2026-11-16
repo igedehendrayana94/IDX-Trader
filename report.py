@@ -1,5 +1,6 @@
 """Monthly report: what the ML-assisted menus recommended each day vs the real prices afterwards.
 Usage: python report.py [YYYY-MM]   (default: current month) -> reports/idx_trader_YYYY-MM.xlsx + CSVs.
+The app's "Akurasi" tab calls replay() for any date range and shows the same numbers live.
 
 The app does not log its daily output, so the month is replayed point-in-time: per style one model is trained only
 on rows whose outcome was known before the month started, then it scores every trading day of the month.
@@ -33,13 +34,21 @@ def week_label(d):
     return f"{y}-W{w:02d} ({mon:%d/%m}–{fri:%d/%m})"
 
 
-def replay(month):
+def month_range(month):
     first = pd.Timestamp(f"{month}-01")
-    last = first + pd.offsets.MonthEnd(0)
+    return first, first + pd.offsets.MonthEnd(0)
+
+
+def replay(first, last, raw=None, data=None, ihsg=None):
+    """Point-in-time replay of the dates first..last (Timestamps). raw = bars incl. today's (for BSJP's next open),
+    data/ihsg = closed bars; fetched when not given. Returns (bsjp rows, rekomendasi rows, info, all scored rows)."""
     now = datetime.now(timing.WIB)
-    raw = idx.fetch(idx.UNIVERSE, period="5y")
-    data = {c: timing.drop_unfinished(d, now) for c, d in raw.items()}
-    ihsg = timing.drop_unfinished(idx.fetch_ihsg(period="5y"), now)
+    raw = raw if raw is not None else idx.fetch(idx.UNIVERSE, period="5y")
+    data = data if data is not None else {c: timing.drop_unfinished(d, now) for c, d in raw.items()}
+    ihsg = ihsg if ihsg is not None else timing.drop_unfinished(idx.fetch_ihsg(period="5y"), now)
+    scored = {}
+    if not ((ihsg.index >= first) & (ihsg.index <= last)).any():  # no closed trading day in the range
+        return pd.DataFrame(), pd.DataFrame(), {"data_to": ihsg.index[-1].date()}, {}
     light = risk.regime_series(data, ihsg)["light"]
     names = idx.NAMES
 
@@ -60,6 +69,7 @@ def replay(month):
     liquid["prob"] = m.predict_proba(liquid[ml.cols(liquid)])[:, 1]
     liquid["rank"] = liquid.groupby("date")["prob"].rank(ascending=False, method="first")
     base_bsjp = liquid["ret"].mean()  # all liquid stock-days, net: the comparison line
+    scored["bsjp"] = liquid[["date", "code", "prob", "rank", "ret", "y"]]
     bsjp = []
     for _, r in liquid[liquid["rank"] <= 3].sort_values(["date", "rank"]).iterrows():
         d, c = r["date"], r["code"]
@@ -97,6 +107,7 @@ def replay(month):
         rows = rows[rows["value20"] >= MIN_VALUE].copy()
         rows["prob"] = m.predict_proba(rows[ml.cols(rows)])[:, 1]
         rows["rank"] = rows.groupby("date")["prob"].rank(ascending=False, method="first")
+        scored[mode] = rows[["date", "code", "prob", "rank", "ret", "y"]]
         frames = {c: idx.indicators(df) for c, df in data.items()}
         sigs = {c: idx.conditions(d_ind, mode).all(axis=1) for c, d_ind in frames.items()}
         for _, r in rows.iterrows():
@@ -132,8 +143,50 @@ def replay(month):
                             "Status": STATUS_DONE if done else STATUS_OPEN})
             rek.append(row)
     rek = sorted(rek, key=lambda r: (r["Tanggal sinyal"], r["Gaya"], r["Peringkat ML"]))
-    return pd.DataFrame(bsjp), pd.DataFrame(rek), {"bsjp_auc": auc, "bsjp_base": base_bsjp, **edge,
-                                                    "data_to": max(df.index[-1] for df in data.values()).date()}
+    info = {"bsjp_auc": auc, "bsjp_base": base_bsjp, **edge,
+            "data_to": max(df.index[-1] for df in data.values()).date()}
+    return pd.DataFrame(bsjp), pd.DataFrame(rek), info, scored
+
+
+def summarize(bsjp, rek, scored, by_week=False):
+    """Accuracy per menu (finished trades only, net of fees). 'Akurasi' = share of finished picks that made a profit;
+    AUC = how well the ML ranked all liquid stocks in the period (0.5 = coin flip)."""
+    from sklearn.metrics import roc_auc_score
+    fb, fs = idx.BUY_FEE, idx.SELL_FEE
+    b = bsjp.assign(net=lambda x: x["Harga buka sebenarnya"] * (1 - fs) / (x["Harga beli (penutupan)"] * (1 + fb)) - 1,
+                    pl=lambda x: (x["Harga buka sebenarnya"] * (1 - fs) - x["Harga beli (penutupan)"] * (1 + fb)) * idx.LOT,
+                    date=lambda x: x["Tanggal"]) if len(bsjp) else bsjp
+    r = rek.assign(net=lambda x: x["Harga keluar"] * (1 - fs) / (x["Harga beli sebenarnya"] * (1 + fb)) - 1,
+                   pl=lambda x: (x["Harga keluar"] * (1 - fs) - x["Harga beli sebenarnya"] * (1 + fb)) * idx.LOT,
+                   date=lambda x: x["Tanggal sinyal"]) if len(rek) else rek
+    menus = []
+    if len(b):
+        menus += [("BSJP – ML #1", b[b["Peringkat ML"] == 1], "bsjp"), ("BSJP – ML top 3", b, "bsjp")]
+    if len(r):
+        for gaya, key in (("Harian", "daily"), ("Swing", "swing")):
+            g = r[r["Gaya"] == gaya]
+            menus += [(f"{gaya} – ML top 3", g[g["Peringkat ML"] <= 3], key),
+                      (f"{gaya} – sinyal 4 syarat", g[g["4 syarat terpenuhi"] == "Ya"], key)]
+    rows = []
+    for name, df, key in menus:
+        groups = df.groupby("Minggu") if by_week else [("Periode ini", df)]
+        for week, g in groups:
+            done = g[g["Status"] == STATUS_DONE]
+            sc = scored.get(key, pd.DataFrame(columns=["date", "ret", "y", "prob"]))
+            if by_week:
+                sc = sc[sc["date"].dt.date.map(week_label) == week]
+            lab = sc[sc["y"].notna()]
+            rows.append({
+                "Menu": name, "Minggu": week, "Rekomendasi": len(g), "Selesai": len(done),
+                "Untung": int((done["net"] > 0).sum()),
+                "Akurasi (untung/selesai)": (done["net"] > 0).mean() if len(done) else np.nan,
+                "Prediksi ML rata-rata": done["Peluang untung (ML)"].mean() if len(done) else np.nan,
+                "Rata-rata hasil bersih": done["net"].mean() if len(done) else np.nan,
+                "Total untung/rugi per lot (Rp)": done["pl"].sum(),
+                "Semua saham (pembanding)": sc["ret"].mean() if len(sc) else np.nan,
+                "AUC periode": roc_auc_score(lab["y"], lab["prob"]) if lab["y"].nunique() == 2 else np.nan,
+            })
+    return pd.DataFrame(rows)
 
 
 # ---------- Excel ----------
@@ -164,7 +217,7 @@ def sheet_table(ws, df, formats, formulas):
     return {h: get_column_letter(j) for j, h in enumerate(cols, 1)}
 
 
-def build(month, bsjp, rek, info):
+def build(title, bsjp, rek, info):
     wb = Workbook()
     summ = wb.active
     summ.title = "Ringkasan"
@@ -247,7 +300,7 @@ def build(month, bsjp, rek, info):
     def extra_crit(rng, week):
         return f',{rng("Minggu")},"{week}"' if week else ""
 
-    summ["A1"] = f"IDX Trader – ringkasan rekomendasi ML bulan {month}"
+    summ["A1"] = f"IDX Trader – ringkasan rekomendasi ML {title}"
     summ["A1"].font = Font(name="Arial", size=14, bold=True)
     summ["A2"] = (f"Data sampai {info['data_to']:%d/%m/%Y}. Replay point-in-time: model dilatih hanya dengan hasil yang "
                   f"sudah diketahui sebelum awal bulan. Hasil per transaksi setelah biaya (lihat sheet Asumsi).")
@@ -297,10 +350,10 @@ def build(month, bsjp, rek, info):
 
 if __name__ == "__main__":
     month = sys.argv[1] if len(sys.argv) > 1 else f"{datetime.now(timing.WIB):%Y-%m}"
-    bsjp, rek, info = replay(month)
+    bsjp, rek, info, _ = replay(*month_range(month))
     OUT.mkdir(exist_ok=True)
     path = OUT / f"idx_trader_{month}.xlsx"
-    build(month, bsjp, rek, info).save(path)
+    build(f"bulan {month}", bsjp, rek, info).save(path)
     bsjp.to_csv(OUT / f"idx_trader_{month}_bsjp.csv", index=False)
     rek.to_csv(OUT / f"idx_trader_{month}_rekomendasi.csv", index=False)
     print(path, len(bsjp), "BSJP rows,", len(rek), "rekomendasi rows")
